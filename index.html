@@ -1,0 +1,2836 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anonimizador IA — FuturIA</title>
+  <meta name="description" content="Anonimiza datos sensibles antes de usar modelos de IA. Procesamiento 100% local, sin servidores, sin almacenamiento." />
+  <meta property="og:title" content="Anonimizador IA — FuturIA" />
+  <meta property="og:description" content="Protege información sensible antes de usar modelos de IA. Sin servidores, sin almacenamiento." />
+  <!-- CDN con version EXACTA (estandar FuturIApp): un salto de version mayor del CDN
+       rompe la app en produccion sin que nadie toque el codigo. -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.9/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <!-- pdf.js para extracción de PDFs (lazy-loaded) -->
+  <script>
+    window.PDFJS_CDN = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js';
+    window.PDFJS_WORKER = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    window.MAMMOTH_CDN = 'https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js';
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #ffffff; color: #222222; margin: 0; }
+    mark.anon { border-radius: 4px; padding: 0 2px; }
+    @media print {
+      header, nav, footer, .no-print { display: none !important; }
+      body { margin: 0; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useMemo } = React;
+
+function cn(...classes) { return classes.filter(Boolean).join(' '); }
+
+// ─── Money range formatter ────────────────────────────────────────────────────
+function formatMoneyRange(value) {
+  const cleaned = String(value).replace(/\./g, '').replace(/,/g, '.');
+  const n = parseFloat(cleaned);
+  if (isNaN(n)) return null;
+  const low = Math.max(0, Math.round(n * 0.90));
+  const high = Math.round(n * 1.10);
+  const fmt = v => new Intl.NumberFormat('es-ES').format(v);
+  return '$~' + fmt(low) + '–' + fmt(high);
+}
+
+// ─── Categorías ───────────────────────────────────────────────────────────────
+const CATS = [
+  {
+    id: 'credentials',
+    label: 'Credenciales y API keys',
+    ex: 'api_key=abc123, sk_live_EJEMPLO_FICTICIO, password: secreta',
+    color: '#dc2626', bg: '#fef2f2', border: '#fecaca', tag: 'CREDENCIAL',
+    on: true, alwaysOn: true,
+    pats: [
+      /\b(?:sk_live|sk_test|sk_proj)[A-Za-z0-9_\-]{10,}/g,
+      /\b(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|auth[_\-]?token|client[_\-]?secret)[\s:=]+['"]?[A-Za-z0-9_\-.]{8,}['"]?/gi,
+      /\bpassword[\s:=]+['"]?[^\s'"]{6,}['"]?/gi,
+      /\bcontraseña[\s:=]+['"]?[^\s'"]{6,}['"]?/gi,
+      /\bbearer\s+[A-Za-z0-9_\-.]{10,}/gi,
+    ]
+  },
+  {
+    id: 'url',
+    label: 'URLs y dominios',
+    ex: 'https://empresa.com/docs/contrato',
+    color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', tag: 'URL',
+    on: true,
+    pats: [
+      /https?:\/\/[^\s"'<>)\]]+/gi,
+      /www\.[a-z0-9\-]+\.[a-z]{2,}[^\s"'<>)\]]*/gi,
+    ]
+  },
+  {
+    id: 'email',
+    label: 'Correos electrónicos',
+    ex: 'maria.garcia@empresa.com',
+    color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', tag: 'EMAIL',
+    on: true,
+    pats: [/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/gi]
+  },
+  {
+    id: 'financial',
+    label: 'Cuentas financieras (IBAN / tarjetas)',
+    ex: 'ES91 2100 0418 4502 0005 1332',
+    color: '#065f46', bg: '#ecfdf5', border: '#a7f3d0', tag: 'CUENTA',
+    on: true,
+    pats: [
+      /\b[A-Z]{2}\d{2}[\s\-]?(?:\d{4}[\s\-]?){4,6}\b/gi,
+      /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g,
+    ]
+  },
+  {
+    id: 'ip',
+    label: 'Direcciones IP',
+    ex: '192.168.1.105',
+    color: '#92400e', bg: '#fffbeb', border: '#fde68a', tag: 'IP',
+    on: true,
+    pats: [
+      /\b(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
+    ]
+  },
+  {
+    id: 'fiscal',
+    label: 'IDs fiscales (LATAM + USA)',
+    ex: 'RFC, CUIT, RUC, NIT, RUT, SSN, EIN, CURP, RIF…',
+    color: '#9f1239', bg: '#fff1f2', border: '#fecdd3', tag: 'ID_FISCAL',
+    on: true,
+    pats: [
+      // México — RFC persona (AAAA######XXX) y empresa (AAA######XXX)
+      /\b[A-ZÁÉÍÓÚÑ&]{3,4}\d{6}[A-Z0-9]{3}\b/gi,
+      // México — CURP (18 chars: AAAA######HMMMXXX##)
+      /\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z\d]\d\b/gi,
+      // Argentina — CUIT/CUIL: XX-XXXXXXXX-X
+      /\b\d{2}-\d{7,8}-\d\b/g,
+      // Chile — RUT: XX.XXX.XXX-X
+      /\b\d{1,2}\.\d{3}\.\d{3}-[\dkK]\b/gi,
+      // Colombia — NIT: XXX.XXX.XXX-X
+      /\b\d{3}\.\d{3}\.\d{3}-\d\b/g,
+      // Venezuela — RIF: J-XXXXXXXX-X / V-XXXXXXXX-X
+      /\b[JVEGPC]-\d{8}-\d\b/gi,
+      // El Salvador — NIT: XXXX-XXXXXX-XXX-X
+      /\b\d{4}-\d{6}-\d{3}-\d\b/g,
+      // República Dominicana — RNC: XXX-XXXXX-X
+      /\b\d{3}-\d{5}-\d\b/g,
+      // EE.UU. — SSN: XXX-XX-XXXX
+      /\b\d{3}-\d{2}-\d{4}\b/g,
+      // EE.UU. — EIN/FEIN/Tax ID: XX-XXXXXXX (solo en contexto fiscal)
+      /\b(?:EIN|FEIN|Tax\s?ID|Federal\s?ID)[\s:#]*\d{2}-\d{7}\b/gi,
+      // Genérico — palabra clave fiscal + número (cubre RUC, CPF, CNPJ, NIT, RTN, DNI, CI, TIN, ITIN)
+      /\b(?:RUC|CPF|CNPJ|NIT|RTN|ITIN|TIN|SSN|EIN|CUIT|CUIL|CURP|RIF|RFC|DNI|CI|RUT|RNC)[\s:#]*[\d\.\-\/]{6,18}\b/gi,
+    ]
+  },
+  {
+    id: 'phone',
+    label: 'Teléfonos',
+    ex: '+52 55 1234 5678',
+    color: '#4338ca', bg: '#eef2ff', border: '#c7d2fe', tag: 'TELEFONO',
+    on: true,
+    pats: [
+      /\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}\b/g,
+      /\(\d{2,4}\)[\s\-]?\d{3,4}[\s\-]?\d{3,4}\b/g,
+    ]
+  },
+  {
+    id: 'money',
+    label: 'Montos exactos → rangos ~±10%',
+    ex: '$85.340 → $~76.806–$93.874',
+    color: '#b45309', bg: '#fffbeb', border: '#fcd34d', tag: 'MONTO',
+    on: false,
+    pats: [
+      /\$\s?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\b/g,
+    ]
+  },
+  {
+    id: 'address',
+    label: 'Direcciones físicas (heurístico)',
+    ex: 'Av. República #123, Calle Bolívar 45',
+    color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', tag: 'DIRECCION',
+    on: false,
+    pats: [
+      /\b(?:Av\.?|Avenida|Calle|Cl\.|Carrera|Cra\.|Pasaje|Pje\.|Jirón|Jr\.|Boulevard|Blvd\.?)\s+[^\n,.;]{2,35}(?:(?:#|Nro\.?|No\.?|N°|número)\s?\d{1,6})?\b/gi,
+    ]
+  },
+  {
+    id: 'company',
+    label: 'Nombres de empresa (heurístico)',
+    ex: 'Acme S.A., XYZ Corp.',
+    color: '#0f766e', bg: '#f0fdfa', border: '#99f6e4', tag: 'EMPRESA',
+    on: false,
+    pats: [
+      /\b[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ]+(?: [A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ]+)* (?:S\.A\.|S\.A\.S\.|S\.R\.L\.|S\.L\.|Corp\.|LLC|Ltd\.|Inc\.|GmbH|SpA|E\.I\.R\.L\.)\b/g,
+    ]
+  },
+  {
+    id: 'date',
+    label: 'Fechas específicas (heurístico)',
+    ex: '15/03/2024, marzo de 2024',
+    color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd', tag: 'FECHA',
+    on: false,
+    pats: [
+      /\b(?:0?[1-9]|[12]\d|3[01])[\/\-](?:0?[1-9]|1[0-2])[\/\-](?:19|20)\d{2}\b/g,
+      /\b(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre) (?:de )?\d{4}\b/gi,
+    ]
+  },
+];
+
+// ─── Categoría de términos personalizados ────────────────────────────────────
+const CUSTOM_CAT = {
+  id: 'custom', label: 'Término personalizado', tag: 'PERSONALIZADO',
+  color: '#374151', bg: '#f9fafb', border: '#d1d5db',
+};
+
+// ─── Lógica de anonimización ──────────────────────────────────────────────────
+function runAnonymize(text, activeCats, customTerms) {
+  const reps = [];
+  let out = text;
+  const counters = {};
+
+  for (const cat of activeCats) {
+    counters[cat.id] = 0;
+    for (const pat of cat.pats) {
+      pat.lastIndex = 0;
+      out = out.replace(pat, (match) => {
+        if (/^\[[^\]]+_\d+\]$/.test(match.trim())) return match;
+        counters[cat.id]++;
+        const tag = '[' + cat.tag + '_' + counters[cat.id] + ']';
+
+        let hint = null;
+        if (cat.id === 'money') {
+          const numPart = match.replace(/[$\s]/g, '');
+          hint = formatMoneyRange(numPart);
+        }
+
+        reps.push({ original: match, replacement: tag, catId: cat.id, catLabel: cat.label, hint });
+        return tag;
+      });
+    }
+  }
+
+  if (customTerms && customTerms.trim()) {
+    const terms = [...new Set(
+      customTerms.split('\n').map(t => t.trim()).filter(t => t.length >= 2)
+    )];
+    counters['custom'] = 0;
+    for (const term of terms) {
+      const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pat = new RegExp(esc, 'gi');
+      out = out.replace(pat, (match) => {
+        if (/^\[[^\]]+_\d+\]$/.test(match.trim())) return match;
+        counters['custom']++;
+        const tag = '[PERSONALIZADO_' + counters['custom'] + ']';
+        reps.push({ original: match, replacement: tag, catId: 'custom', catLabel: 'Término personalizado', hint: null });
+        return tag;
+      });
+    }
+  }
+
+  return { out, reps };
+}
+
+// ─── Riesgo residual ──────────────────────────────────────────────────────────
+const RISK_CHECKS = [
+  { id: 'credentials', label: 'Credenciales', weight: 50, pats: [/(sk_live|sk_test|api[_-]?key|bearer|password|contraseña)[\s:=]+['"]?[A-Za-z0-9_\-.]{8,}['"]?/gi] },
+  { id: 'email', label: 'Emails', weight: 25, pats: [/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/gi] },
+  { id: 'financial', label: 'Cuentas', weight: 25, pats: [/\b[A-Z]{2}\d{2}[\s\-]?(?:\d{4}[\s\-]?){4,6}\b/gi] },
+  { id: 'ip', label: 'IPs', weight: 15, pats: [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g] },
+  { id: 'phone', label: 'Teléfonos', weight: 15, pats: [/\+\d{1,3}[\s\-]?\d{3,4}[\s\-]?\d{3,4}/g] },
+  { id: 'fiscal', label: 'IDs fiscales', weight: 20, pats: [/\b[A-Z]{3,4}\d{6}[A-Z0-9]{3}\b/gi] },
+];
+
+function computeResidualRisk(text) {
+  if (!text) return { score: 0, hits: [] };
+  let score = 0;
+  const hits = [];
+  for (const check of RISK_CHECKS) {
+    for (const pat of check.pats) {
+      pat.lastIndex = 0;
+      if (pat.test(text)) {
+        score += check.weight;
+        hits.push(check.label);
+        break;
+      }
+    }
+  }
+  return { score: Math.min(100, score), hits };
+}
+
+function getRiskInfo(score) {
+  if (score >= 60) return { label: 'Alto riesgo', emoji: '🔴', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
+  if (score >= 20) return { label: 'Revisar antes de usar', emoji: '🟡', color: '#d97706', bg: '#fffbeb', border: '#fcd34d' };
+  return { label: 'Listo para usar', emoji: '🟢', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' };
+}
+
+// ─── Texto de muestra ─────────────────────────────────────────────────────────
+const SAMPLE_TEXT = `Estimada María García,
+
+Le escribo en nombre de Sistemas Integrados del Norte S.A. para confirmar el contrato firmado el 15/03/2024 por un valor de $85.340.
+
+Datos de contacto del responsable técnico:
+- Correo: maria.garcia@sistemasintegrados.com
+- Teléfono: +52 55 4321 0987
+- IP del servidor principal: 192.168.10.25
+- Portal interno: https://intranet.sistemasintegrados.com/contrato-anual
+- Dirección: Av. República #123, Piso 4
+
+Datos de facturación:
+- RFC: GARM850101H12
+- Cuenta IBAN: ES91 2100 0418 4502 0005 1332
+- Tarjeta corporativa: 4539 1488 0343 6467
+
+Credenciales del entorno de pruebas:
+- api_key = sk_test_EJEMPLO_FICTICIO_NO_REAL_24
+
+Saludos,
+Carlos López Herrera
+Director de Tecnología — Sistemas Integrados del Norte S.A.
+`;
+
+// ─── Componentes UI base ──────────────────────────────────────────────────────
+function AppButton({ children, onClick, variant = "primary", className = "", type = "button", disabled = false }) {
+  const base = "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 disabled:opacity-50 disabled:cursor-not-allowed";
+  const styles = variant === "primary"
+    ? "bg-[#b00020] text-white hover:bg-[#8c001a]"
+    : "border border-[#e5e5e5] bg-white text-[#333333] hover:bg-[#fff5f6]";
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} className={cn(base, styles, className)}>
+      {children}
+    </button>
+  );
+}
+
+function InfoIcon({ text }) {
+  if (!text) return null;
+  return (
+    <span className="group relative inline-flex cursor-help select-none items-center">
+      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[#2A5B8C] text-xs font-bold text-[#2A5B8C]">?</span>
+      <span className="pointer-events-none absolute left-6 top-0 z-30 hidden w-72 rounded-xl border border-[#e5e5e5] bg-white p-3 text-xs font-normal leading-relaxed text-[#333333] shadow-lg group-hover:block">{text}</span>
+    </span>
+  );
+}
+
+// ─── Semáforo de riesgo residual ──────────────────────────────────────────────
+function RiskSemaphore({ text, activeCatIds }) {
+  const { score, hits } = useMemo(() => computeResidualRisk(text), [text]);
+  const info = getRiskInfo(score);
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4"
+      style={{ backgroundColor: info.bg, borderColor: info.border }}>
+      <span className="text-2xl">{info.emoji}</span>
+      <div>
+        <div className="font-bold text-sm" style={{ color: info.color }}>{info.label} — Riesgo residual: {score}%</div>
+        {hits.length > 0 ? (
+          <div className="text-xs mt-0.5" style={{ color: info.color }}>
+            Patrones detectados aún presentes: {hits.join(', ')} — activa esas categorías o revisa manualmente.
+          </div>
+        ) : (
+          <div className="text-xs mt-0.5 text-[#16a34a]">No se detectaron patrones de alto riesgo en el texto anonimizado.</div>
+        )}
+      </div>
+      <InfoIcon text="El semáforo analiza el texto ya anonimizado buscando patrones de datos sensibles que pudieran haber quedado. Verde = sin patrones detectables. Amarillo = hay categorías con datos detectables que no estaban activas. Rojo = datos de alto riesgo aún presentes — no recomendamos usar este texto con IA." />
+    </div>
+  );
+}
+
+// ─── Modal Acerca de ──────────────────────────────────────────────────────────
+function AboutModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true">
+      <div className="max-w-2xl w-full rounded-[28px] bg-white p-7 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-[#b00020]">FuturIA</p>
+            <h2 className="text-2xl font-bold text-[#222222]">Aplicaciones prácticas para tomar mejores decisiones con IA</h2>
+          </div>
+          <button onClick={onClose} className="rounded-full border border-[#e5e5e5] px-3 py-1.5 text-[#757575] hover:bg-[#fff5f6]" aria-label="Cerrar">×</button>
+        </div>
+        <p className="mb-4 leading-relaxed text-[#333333]">
+          El Anonimizador IA detecta y reemplaza datos sensibles en tus documentos antes de compartirlos con modelos de IA.
+          Todo el procesamiento ocurre en tu navegador — ningún texto viaja a ningún servidor.
+        </p>
+        <div className="mb-4 rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 text-sm text-[#333333]">
+          <strong>Privacidad garantizada:</strong> sin cookies, sin localStorage, sin servidores. Al cerrar la pestaña, todo desaparece.
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {["+70K suscriptores", "+300K visitas/mes", "+80 países"].map((item) => (
+            <div key={item} className="rounded-2xl border border-[#e5e5e5] bg-[#fff5f6] p-4 text-center font-semibold text-[#222222]">{item}</div>
+          ))}
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <AppButton variant="secondary" onClick={onClose}>Cerrar</AppButton>
+          <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer">
+            <AppButton>Únete a FuturIA</AppButton>
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Output con highlights ────────────────────────────────────────────────────
+function HighlightedOutput({ text, reps, cats }) {
+  const catMap = {};
+  cats.forEach(c => { catMap[c.id] = c; });
+  const repMap = {};
+  reps.forEach(r => { repMap[r.replacement] = r; });
+
+  const tagPattern = /(\[[A-Z_]+_\d+\])/g;
+  const parts = text.split(tagPattern);
+
+  return (
+    <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-[#222222]">
+      {parts.map((part, i) => {
+        const rep = repMap[part];
+        if (rep) {
+          const cat = catMap[rep.catId];
+          if (!cat) return <span key={i}>{part}</span>;
+          const label = rep.hint ? part + ' (' + rep.hint + ')' : part;
+          return (
+            <mark key={i} className="anon cursor-default"
+              title={'Original: ' + rep.original + (rep.hint ? ' → ' + rep.hint : '')}
+              style={{ backgroundColor: cat.bg, color: cat.color, border: '1px solid ' + cat.border }}>
+              {label}
+            </mark>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </pre>
+  );
+}
+
+// ─── Document Body (párrafos con highlights, para el visor) ──────────────────
+function DocumentBody({ text, reps, cats, showMarks }) {
+  const catMap = {};
+  cats.forEach(c => { catMap[c.id] = c; });
+  const repMap = {};
+  reps.forEach(r => { repMap[r.replacement] = r; });
+  const tagPattern = /(\[[A-Z_]+_\d+\])/g;
+
+  const renderInline = (para, paraIdx) => {
+    const parts = para.split(tagPattern);
+    return (
+      <p key={paraIdx} style={{ marginBottom: '1.1em', lineHeight: '1.75', fontSize: '11pt', color: '#222' }}>
+        {parts.map((part, i) => {
+          const rep = repMap[part];
+          if (rep) {
+            const cat = catMap[rep.catId];
+            if (!cat) return <span key={i}>{part}</span>;
+            const label = rep.hint ? part + ' (' + rep.hint + ')' : part;
+            if (!showMarks) return <span key={i} style={{ fontFamily: 'monospace', fontSize: '0.88em' }}>{label}</span>;
+            return (
+              <mark key={i}
+                title={'Original: ' + rep.original + (rep.hint ? ' → ' + rep.hint : '')}
+                style={{ backgroundColor: cat.bg, color: cat.color, border: '1px solid ' + cat.border, borderRadius: '4px', padding: '0 3px', cursor: 'default', fontFamily: 'monospace', fontSize: '0.88em' }}>
+                {label}
+              </mark>
+            );
+          }
+          return <span key={i}>{part}</span>;
+        })}
+      </p>
+    );
+  };
+
+  const paragraphs = text.split(/\n\n+/);
+  return (
+    <div>
+      {paragraphs.map((para, i) => para.trim() ? renderInline(para, i) : <br key={i} />)}
+    </div>
+  );
+}
+
+// ─── Descarga Word (.doc) ─────────────────────────────────────────────────────
+function escXml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function downloadWordDoc(filename, title, bodyHtml) {
+  const doc = [
+    '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
+    '      xmlns:w="urn:schemas-microsoft-com:office:word"',
+    '      xmlns="http://www.w3.org/TR/REC-html40">',
+    '<head>',
+    '<meta charset="UTF-8">',
+    '<title>' + escXml(title) + '</title>',
+    '<style>',
+    '  @page WordSection1 {',
+    '    size: 595.3pt 841.9pt;',
+    '    margin: 2.5cm 3cm 2.5cm 3cm;',
+    '    mso-header-margin: 1cm;',
+    '    mso-footer-margin: 1cm;',
+    '  }',
+    '  div.WordSection1 { page: WordSection1; }',
+    '  body { font-family: Calibri, sans-serif; font-size: 11pt; color: #1f1f1f; margin: 0; padding: 0; }',
+    '  p { margin: 0 0 8pt 0; padding: 0; line-height: 1.5; font-size: 11pt; }',
+    '  h1 { font-family: Calibri, sans-serif; font-size: 22pt; color: #b00020; font-weight: bold; margin: 0 0 6pt 0; padding: 0; }',
+    '  h2 { font-family: Calibri, sans-serif; font-size: 10pt; color: #b00020; font-weight: bold; margin: 18pt 0 6pt 0; padding: 0 0 3pt 0; border-bottom: 1pt solid #b00020; }',
+    '  .meta { font-size: 8pt; color: #888888; line-height: 1.6; margin: 0 0 12pt 0; padding: 0 0 10pt 0; border-bottom: 1pt solid #dddddd; }',
+    '  .instr { font-size: 9pt; color: #333333; line-height: 1.65; margin: 0 0 16pt 0; padding: 8pt 14pt; background: #f9f9f9; border-left: 3pt solid #b00020; mso-border-left-alt: solid #b00020 3.0pt; }',
+    '  .note { font-size: 8.5pt; color: #666666; font-style: italic; margin: 0 0 18pt 0; }',
+    '  table { border-collapse: collapse; width: 100%; font-size: 9pt; margin: 0 0 16pt 0; mso-table-lspace: 0; mso-table-rspace: 0; }',
+    '  th { background: #b00020; color: #ffffff; border: 1pt solid #9a001a; padding: 5pt 8pt; font-size: 8.5pt; font-weight: bold; text-align: left; }',
+    '  td { border: 1pt solid #cccccc; padding: 4pt 8pt; vertical-align: top; font-size: 9pt; line-height: 1.4; }',
+    '  tr.alt td { background: #f5f5f5; }',
+    '  .tag { font-family: "Courier New", monospace; font-size: 8.5pt; }',
+    '  .body-p { font-size: 11pt; line-height: 1.65; margin: 0 0 10pt 0; text-align: justify; }',
+    '  .footer { font-size: 7.5pt; color: #aaaaaa; margin: 28pt 0 0 0; padding: 8pt 0 0 0; border-top: 1pt solid #dddddd; }',
+    '</style>',
+    '</head>',
+    '<body><div class="WordSection1">' + bodyHtml + '</div></body></html>',
+  ].join('\n');
+
+  const blob = new Blob(['﻿' + doc], { type: 'application/msword;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename + '.doc';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ─── Descarga combinada: tabla de equivalencias (pág. 1) + texto anonimizado ──
+function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, riskLabel, timestamp, originalLen }) {
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const catMap = {};
+  cats.forEach(c => { catMap[c.id] = c; });
+  const countByCat = {};
+  activeCats.forEach(c => { countByCat[c.id] = 0; });
+  reps.forEach(r => { if (countByCat[r.catId] !== undefined) countByCat[r.catId]++; });
+  const riskEmoji = riskScore >= 60 ? '🔴' : riskScore >= 20 ? '🟡' : '🟢';
+
+  const tableRows = reps.map((r, idx) => {
+    const cat = catMap[r.catId];
+    const tagStyle = cat ? 'background:' + cat.bg + ';color:' + cat.color + ';border:1pt solid ' + cat.border + ';padding:0 3pt;' : '';
+    const rowClass = idx % 2 === 1 ? ' class="alt"' : '';
+    return '<tr' + rowClass + '>' +
+      '<td><span class="tag" style="' + tagStyle + '">' + escXml(r.replacement) + '</span></td>' +
+      '<td>' + escXml(r.original) + '</td>' +
+      '<td>' + escXml(r.hint || '—') + '</td>' +
+      '<td>' + escXml(r.catLabel) + '</td>' +
+      '</tr>';
+  }).join('\n');
+
+  const summaryRows = activeCats.map((c, idx) => {
+    const rowClass = idx % 2 === 1 ? ' class="alt"' : '';
+    return '<tr' + rowClass + '><td>' + escXml(c.label) + '</td><td><span class="tag">[' + escXml(c.tag) + '_N]</span></td><td>' + (countByCat[c.id] || 0) + '</td></tr>';
+  }).join('\n');
+
+  const anonParas = anonText.split(/\n\n+/).map(p => p.trim()).filter(p => p)
+    .map(p => '<p class="body-p">' + escXml(p).replace(/\n/g, '<br>') + '</p>').join('\n');
+
+  const body = [
+    // ── Página 1: Tabla de equivalencias ──
+    '<h1>Tabla de equivalencias</h1>',
+    '<p class="meta">FuturIA Anonimizador IA &nbsp;&middot;&nbsp; ' + escXml(timestamp) + '<br>',
+    'Total de reemplazos: <strong>' + reps.length + '</strong> &nbsp;&middot;&nbsp; Riesgo residual: ' + riskEmoji + ' ' + escXml(riskLabel) + ' (' + riskScore + '%)</p>',
+    '<div class="instr">',
+    '<p style="margin:0 0 6pt 0;"><strong>¿Qué es esta tabla?</strong> Mapeo completo entre cada etiqueta del texto anonimizado y el dato original que reemplaza. Es el único lugar donde aparecen los datos sin anonimizar.</p>',
+    '<p style="margin:0 0 6pt 0;"><strong>¿Cómo usarla?</strong> Guárdala en un lugar seguro. Para recuperar el texto original, busca cada etiqueta (ej. <span class="tag">[EMAIL_1]</span>) en la página siguiente y sustitúyela por el valor de la columna "Dato original".</p>',
+    '<p style="margin:0;"><strong>⚠ Confidencialidad:</strong> este archivo contiene los datos originales. Trátalo con el mismo nivel de confidencialidad que el documento fuente. No lo compartas con modelos de IA.</p>',
+    '</div>',
+    '<h2>Detalle de reemplazos (' + reps.length + ')</h2>',
+    '<table>',
+    '<tr><th>Etiqueta</th><th>Dato original</th><th>Rango / hint</th><th>Categoría</th></tr>',
+    tableRows,
+    '</table>',
+    '<h2>Resumen por categoría</h2>',
+    '<table>',
+    '<tr><th>Categoría</th><th>Etiqueta</th><th>Reemplazos</th></tr>',
+    summaryRows,
+    '</table>',
+    // ── Salto de página Word-compatible ──
+    '<br clear="all" style="mso-special-character:line-break;page-break-before:always">',
+    // ── Página siguiente: Texto anonimizado ──
+    '<h1>Texto anonimizado</h1>',
+    '<p class="meta">FuturIA Anonimizador IA &nbsp;&middot;&nbsp; ' + escXml(timestamp) + '<br>',
+    'Caracteres originales: ' + originalLen.toLocaleString() + ' &nbsp;&middot;&nbsp; Anonimizados: ' + anonText.length.toLocaleString() + '<br>',
+    'Riesgo residual: ' + riskEmoji + ' ' + escXml(riskLabel) + ' (' + riskScore + '%)</p>',
+    '<p class="note">Texto listo para enviar a modelos de IA — datos sensibles reemplazados por etiquetas. Consulta la página anterior para recuperar los datos originales.</p>',
+    anonParas,
+    '<p class="footer">Procesado 100% en navegador &mdash; sin servidores, sin almacenamiento. &nbsp; futuria.substack.com</p>',
+  ].join('\n');
+
+  downloadWordDoc('anonimizado-' + dateStr, 'Anonimizador IA — FuturIA', body);
+}
+
+// ─── Visor de documento modal ─────────────────────────────────────────────────
+function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileName, originalLen }) {
+  const [showMarks, setShowMarks] = React.useState(true);
+  if (!open) return null;
+
+  const riskData = computeResidualRisk(anonText);
+  const riskInfo = getRiskInfo(riskData.score);
+  const canExport = riskData.score < 60;
+
+  const handlePrint = () => {
+    const catMap = {};
+    cats.forEach(c => { catMap[c.id] = c; });
+    const repMap = {};
+    reps.forEach(r => { repMap[r.replacement] = r; });
+    const tagPattern = /(\[[A-Z_]+_\d+\])/g;
+
+    const paragraphsHtml = anonText.split(/\n\n+/).filter(p => p.trim()).map(para => {
+      const parts = para.split(tagPattern);
+      const inner = parts.map(part => {
+        const rep = repMap[part];
+        if (rep) {
+          const cat = catMap[rep.catId];
+          const label = rep.hint ? part + ' (' + rep.hint + ')' : part;
+          if (cat) return '<mark style="background-color:' + cat.bg + ';color:' + cat.color + ';border:1px solid ' + cat.border + ';border-radius:4px;padding:0 3px;font-family:monospace;font-size:0.88em">' + escXml(label) + '</mark>';
+        }
+        return escXml(part);
+      }).join('');
+      return '<p style="margin-bottom:1.1em;line-height:1.75">' + inner + '</p>';
+    }).join('');
+
+    const dateStr = new Date().toLocaleString('es');
+    const printHtml = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Documento Anonimizado — FuturIA</title><style>' +
+      'body{font-family:Arial,sans-serif;font-size:11pt;color:#222;margin:2.5cm 3cm}' +
+      'h1{font-size:16pt;color:#b00020;margin-bottom:6pt}' +
+      '.meta{font-size:9pt;color:#757575;margin-bottom:20pt;border-bottom:1px solid #e5e5e5;padding-bottom:8pt}' +
+      '.footer{margin-top:32pt;font-size:8pt;color:#aaa;border-top:1px solid #e5e5e5;padding-top:8pt}' +
+      '</style></head><body>' +
+      '<h1>Documento Anonimizado</h1>' +
+      '<div class="meta">FuturIA Anonimizador IA &nbsp;·&nbsp; ' + escXml(dateStr) + '<br>' +
+      'Archivo: ' + escXml(fileName || 'documento') + ' &nbsp;·&nbsp; ' +
+      'Riesgo residual: ' + riskInfo.emoji + ' ' + escXml(riskInfo.label) + ' (' + riskData.score + '%)</div>' +
+      paragraphsHtml +
+      '<div class="footer">Procesado 100% en navegador — sin servidores, sin almacenamiento. futuria.substack.com</div>' +
+      '</body></html>';
+
+    const win = window.open('', '_blank');
+    if (!win) { alert('El navegador bloqueó la ventana emergente. Permite pop-ups para esta página e inténtalo de nuevo.'); return; }
+    win.document.write(printHtml);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+  };
+
+  const handleDownload = () => {
+    downloadCombinedDoc({
+      anonText,
+      reps,
+      cats,
+      activeCats,
+      riskScore: riskData.score,
+      riskLabel: riskInfo.label,
+      timestamp: new Date().toLocaleString('es'),
+      originalLen: originalLen || anonText.length,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: '#f0f0f0' }} role="dialog" aria-modal="true">
+      {/* Toolbar */}
+      <div className="shrink-0 border-b border-[#e5e5e5] bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 px-5 py-3">
+          <button onClick={onClose}
+            className="flex items-center gap-1.5 rounded-xl border border-[#e5e5e5] px-3 py-2 text-sm font-semibold text-[#333333] hover:bg-[#fff5f6] transition">
+            ← Cerrar
+          </button>
+          <div className="mx-2 h-5 w-px bg-[#e5e5e5]" />
+          <span className="text-sm font-semibold" style={{ color: riskInfo.color }}>{riskInfo.emoji} {riskInfo.label} ({riskData.score}%)</span>
+          {fileName && <span className="hidden text-xs text-[#757575] sm:inline">· {fileName}</span>}
+          <div className="flex-1" />
+          <button
+            onClick={() => setShowMarks(v => !v)}
+            className={cn('rounded-xl border px-3 py-2 text-xs font-semibold transition',
+              showMarks ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]' : 'border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]')}>
+            {showMarks ? '● Con marcas' : '○ Sin marcas'}
+          </button>
+          <button onClick={handlePrint}
+            className="flex items-center gap-1.5 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2 text-xs font-semibold text-[#333333] hover:bg-[#fff5f6] transition">
+            🖨 Imprimir
+          </button>
+          <AppButton onClick={handleDownload} disabled={!canExport} className="text-xs">
+            ↓ Descargar .doc
+          </AppButton>
+        </div>
+        {!canExport && (
+          <div className="border-t border-[#fecaca] bg-[#fef2f2] px-5 py-2 text-xs font-semibold text-[#dc2626]">
+            🔴 Exportación deshabilitada — riesgo residual {riskData.score}%. Activa más categorías y vuelve a anonimizar.
+          </div>
+        )}
+      </div>
+
+      {/* Paper scroll area */}
+      <div className="flex-1 overflow-y-auto py-8 px-4">
+        <div className="mx-auto max-w-3xl rounded-sm bg-white shadow-xl" style={{ padding: '3cm 3.5cm', minHeight: '27cm' }}>
+          {/* Doc header */}
+          <div className="mb-6 border-b border-[#e5e5e5] pb-4">
+            <div className="text-xs text-[#aaaaaa]">FuturIA Anonimizador IA &nbsp;·&nbsp; {new Date().toLocaleDateString('es')}</div>
+            {fileName && <div className="mt-0.5 text-xs text-[#aaaaaa]">Archivo: {fileName}</div>}
+          </div>
+
+          {/* Body */}
+          <DocumentBody text={anonText} reps={reps} cats={cats} showMarks={showMarks} />
+
+          {/* Doc footer */}
+          <div className="mt-8 border-t border-[#e5e5e5] pt-4 text-xs text-[#aaaaaa]">
+            Procesado 100% en navegador — sin servidores, sin almacenamiento. &nbsp; futuria.substack.com
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Pestaña Cómo usar ────────────────────────────────────────────────────────
+function HowToTab() {
+  const steps = [
+    { n: '1', icon: '📄', title: 'Pega o sube tu documento',
+      desc: 'Pega texto directamente en la pestaña Texto, o sube un archivo PDF, DOCX, DOC, TXT o CSV. También puedes usar las 50 plantillas de ejemplo organizadas en 8 industrias para probar la app.',
+      tip: 'PDFs escaneados (solo imágenes) no tienen texto extraíble. Usa PDFs con texto seleccionable o extrae el texto con Adobe Acrobat / Google Docs primero.' },
+    { n: '2', icon: '⚙️', title: 'Configura las categorías',
+      desc: 'Activa o desactiva los tipos de datos a detectar. Las credenciales y API keys siempre se detectan. Usa el campo de Términos personalizados para añadir nombres propios, siglas internas o cualquier dato específico de tu industria — un término por línea.',
+      tip: 'Activa solo lo necesario. Empresa, Dirección, Montos y Fechas son opcionales y pueden generar más falsos positivos.' },
+    { n: '3', icon: '🔒', title: 'Haz clic en "Anonimizar"',
+      desc: 'El sistema reemplaza cada dato sensible por una etiqueta única como [EMAIL_1] o [CREDENCIAL_1]. El semáforo de riesgo residual te indica si el texto resultante es seguro. Si el riesgo es alto (🔴), la exportación queda bloqueada hasta revisar.',
+      tip: 'Pasa el cursor sobre cualquier etiqueta para ver el valor original.' },
+    { n: '4', icon: '📤', title: 'Envía al LLM',
+      desc: 'Copia el texto anonimizado con el botón "📋 Copiar texto" y pégalo en ChatGPT, Claude, Gemini o cualquier otro modelo. El LLM trabajará con etiquetas en lugar de datos reales — sin exponer ninguna información sensible.',
+      tip: 'Descarga también el .doc para guardar la tabla de equivalencias junto al texto anonimizado, especialmente si cerrarás el navegador antes de recuperar el resultado.' },
+    { n: '5', icon: '💬', title: 'Procesa con el modelo de IA',
+      desc: 'Haz tu consulta al LLM normalmente. El modelo responderá conservando las etiquetas [TAG_N] en el texto. Copia la respuesta completa — con las etiquetas incluidas.',
+      tip: 'La mayoría de los modelos preservan las etiquetas correctamente. Si el modelo las elimina, pídele explícitamente que las conserve en su respuesta.' },
+    { n: '6', icon: '🔄', title: 'Recupera el texto original',
+      desc: 'Ve a la pestaña "🔄 Recuperar" y pega el texto que te devolvió el LLM. Si estás en la misma sesión, el mapeo se carga automáticamente. Si cerraste el navegador, pega la tabla de equivalencias del .doc descargado. Un clic y el texto vuelve con los datos reales.',
+      tip: 'Al cerrar la pestaña todo desaparece — si planeas recuperar el texto en otra sesión, descarga el .doc antes de cerrar.' },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6">
+        <h2 className="mb-2 text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
+        <p className="mb-4 text-sm text-[#757575]">Protege datos sensibles antes de enviar documentos a modelos de IA. Procesamiento 100% local — sin servidores, sin almacenamiento, sin registro.</p>
+        <div className="rounded-2xl border border-[#b00020]/20 bg-white p-4">
+          <p className="text-sm font-semibold text-[#222222] mb-1">¿Por qué es seguro usar esta app?</p>
+          <p className="text-sm leading-relaxed text-[#333333]">
+            A diferencia de subir un documento a un servicio en la nube, esta app procesa tu texto <strong>únicamente dentro de tu navegador</strong>.
+            El código se ejecuta en tu dispositivo — no existe ningún servidor que reciba, almacene o analice tu contenido.
+            Puedes verificarlo: abre DevTools (F12 → pestaña Red) y comprueba que no hay ninguna petición de red mientras anonimizas.
+            Al cerrar la pestaña, todo desaparece — sin localStorage, cookies ni ningún mecanismo de persistencia.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {steps.map(s => (
+          <div key={s.n} className="rounded-[28px] border border-[#e5e5e5] bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#b00020] text-sm font-bold text-white">{s.n}</span>
+              <span className="text-lg">{s.icon}</span>
+              <span className="font-semibold text-[#222222]">{s.title}</span>
+            </div>
+            <p className="mb-3 text-sm leading-relaxed text-[#333333]">{s.desc}</p>
+            <div className="rounded-xl bg-[#fafafa] px-3 py-2 text-xs text-[#757575]">
+              <span className="font-semibold text-[#2A5B8C]">Tip:</span> {s.tip}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <h3 className="mb-4 text-lg font-bold text-[#222222]">Categorías de detección</h3>
+        <div className="grid gap-3 md:grid-cols-2">
+          {[...CATS, CUSTOM_CAT].map(c => (
+            <div key={c.tag} className="rounded-2xl border p-4 flex items-start gap-3" style={{ borderColor: c.border, backgroundColor: c.bg }}>
+              <mark className="anon text-xs font-mono font-bold px-2 py-1 rounded shrink-0 whitespace-nowrap"
+                style={{ backgroundColor: c.bg, color: c.color, border: '1px solid ' + c.border }}>
+                [{c.tag}_N]
+              </mark>
+              <div>
+                <div className="font-semibold text-sm text-[#222222]">
+                  {c.label}
+                  {c.alwaysOn && <span className="ml-2 text-xs font-normal rounded-full bg-[#fef2f2] text-[#dc2626] border border-[#fecaca] px-2 py-0.5">Siempre activa</span>}
+                  {c.id === 'custom' && <span className="ml-2 text-xs font-normal rounded-full bg-[#f9fafb] text-[#374151] border border-[#d1d5db] px-2 py-0.5">Campo libre</span>}
+                  {!c.on && !c.alwaysOn && c.id !== 'custom' && <span className="ml-1 text-xs text-[#757575]">(desactivada por defecto)</span>}
+                </div>
+                <div className="text-xs text-[#757575] mt-0.5">
+                  {c.id === 'custom'
+                    ? 'Nombres propios, siglas internas, códigos de proyecto, cargos — un término por línea, mínimo 2 caracteres.'
+                    : <span>Ej: <em>{c.ex}</em></span>
+                  }
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white p-6">
+        <h3 className="mb-3 font-bold text-[#222222]">Glosario</h3>
+        <dl className="grid gap-3 text-sm md:grid-cols-2">
+          {[
+            ['Anonimización', 'Sustitución de datos personales por identificadores que no permiten reconocer al individuo.'],
+            ['Seudonimización', 'Anonimización reversible con una tabla de equivalencias. Es lo que hace esta app: las etiquetas [TAG_N] pueden revertirse usando la pestaña Recuperar.'],
+            ['PII', 'Personally Identifiable Information — datos que permiten identificar a una persona (email, teléfono, ID fiscal, nombre propio).'],
+            ['IDs fiscales LATAM+USA', 'RFC (México), CURP (México), CUIT/CUIL (Argentina), RUT (Chile), NIT (Colombia), RIF (Venezuela), RUC (Ecuador/Perú/Paraguay), CPF/CNPJ (Brasil), RTN (Honduras), RNC (R. Dominicana), SSN/EIN (EE.UU.) y otros identificadores tributarios nacionales.'],
+            ['Modo heurístico', 'Categoría que usa reglas aproximadas para detectar datos sensibles. Puede generar falsos positivos (detectar algo que no es sensible) o falsos negativos (no detectar algo que sí lo es). Las categorías Empresa, Dirección y Fecha operan en modo heurístico — revisa el resultado antes de enviar.'],
+            ['Riesgo residual', 'Patrones de datos sensibles detectados en el texto ya anonimizado. Ocurre cuando hay categorías no activas que contienen datos. El semáforo verde/amarillo/rojo lo mide automáticamente.'],
+            ['Falso positivo', 'Dato detectado como sensible que en realidad no lo es. Más frecuente en categorías heurísticas (empresa, dirección, fecha).'],
+            ['Falso negativo', 'Dato sensible que la app no detectó. Revisa siempre el resultado, especialmente en documentos con formatos o idiomas inusuales.'],
+          ].map(([t, d]) => (
+            <div key={t}>
+              <dt className="font-semibold text-[#b00020]">{t}</dt>
+              <dd className="text-[#333333]">{d}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+// ─── Pestaña Privacidad ───────────────────────────────────────────────────────
+function PrivacyTab() {
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6">
+        <h2 className="mb-1 text-xl font-bold text-[#222222]">Privacidad y arquitectura de datos</h2>
+        <p className="text-sm text-[#757575]">Esta app fue diseñada para no guardar, transmitir ni exponer ningún dato.</p>
+      </div>
+      {[
+        { icon: '🔒', title: 'Procesamiento 100% local', body: 'Todo ocurre en tu navegador. El texto nunca sale de tu dispositivo. Sin llamadas a servidores, sin APIs externas, sin logging.' },
+        { icon: '🗑️', title: 'Sin almacenamiento de ningún tipo', body: 'Sin localStorage, sessionStorage, cookies ni IndexedDB. Al cerrar o recargar la pestaña, todo desaparece. Sin rastros en tu navegador.' },
+        { icon: '📡', title: 'Sin telemetría ni analítica', body: 'Sin Google Analytics, Mixpanel, Hotjar ni equivalentes. No se registra qué textos procesas, qué categorías usas ni en qué momentos.' },
+        { icon: '⚠️', title: 'Límites de esta herramienta', body: 'No detecta nombres propios de personas (requiere NLP/IA), no lee PDFs o Word directamente, y no garantiza anonimización completa en textos complejos. Usa siempre el semáforo de riesgo residual y revisa el resultado.' },
+      ].map(item => (
+        <div key={item.title} className="rounded-[28px] border border-[#e5e5e5] bg-white p-6 shadow-sm">
+          <div className="flex items-start gap-4">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#fff5f6] text-xl">{item.icon}</span>
+            <div>
+              <h3 className="mb-2 font-bold text-[#222222]">{item.title}</h3>
+              <p className="text-sm leading-relaxed text-[#333333]">{item.body}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] p-6 text-sm text-[#333333]">
+        <strong className="text-[#222222]">Verificación técnica:</strong> abre DevTools (F12 → Network) mientras usas la app. Verás que no hay peticiones de red durante la anonimización. El único tráfico es la carga inicial de React, Babel y Tailwind desde CDNs públicas.
+      </div>
+    </div>
+  );
+}
+
+// ─── Extracción de texto de archivos ─────────────────────────────────────────
+
+async function loadPdfJs() {
+  if (window.pdfjsLib) return window.pdfjsLib;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = window.PDFJS_CDN;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  // Fetch worker and create a blob URL to avoid CORS issues when running from file://
+  try {
+    const resp = await fetch(window.PDFJS_WORKER);
+    if (resp.ok) {
+      const text = await resp.text();
+      const blob = new Blob([text], { type: 'application/javascript' });
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+    } else {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFJS_WORKER;
+    }
+  } catch (_) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFJS_WORKER;
+  }
+  return window.pdfjsLib;
+}
+
+async function loadMammoth() {
+  if (window.mammoth) return window.mammoth;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = window.MAMMOTH_CDN;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return window.mammoth;
+}
+
+async function extractTextFromFile(file, onProgress) {
+  const ext = file.name.toLowerCase().split('.').pop();
+
+  if (ext === 'txt' || ext === 'csv') {
+    return await file.text();
+  }
+
+  if (ext === 'pdf') {
+    onProgress('Cargando motor PDF…');
+    const pdfjsLib = await loadPdfJs();
+    const arrayBuffer = await file.arrayBuffer();
+    onProgress('Abriendo documento PDF…');
+    let pdf;
+    try {
+      pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    } catch (e) {
+      throw new Error(
+        'No se pudo abrir el PDF. Posibles causas: archivo protegido con contraseña, PDF corrupto o formato no estándar.\n\n' +
+        'Alternativa: abre el PDF, selecciona todo (Ctrl+A), copia y pega el texto directamente en el área de texto.'
+      );
+    }
+    const totalPages = pdf.numPages;
+    let fullText = '';
+    for (let i = 1; i <= totalPages; i++) {
+      onProgress('Extrayendo página ' + i + ' de ' + totalPages + '…');
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n\n';
+    }
+    const trimmed = fullText.trim();
+    if (!trimmed) {
+      throw new Error(
+        'El PDF no contiene texto seleccionable — es un PDF escaneado (solo imágenes).\n\n' +
+        'Alternativa: usa Adobe Acrobat, Google Docs o un OCR online para convertirlo a texto, ' +
+        'luego pégalo aquí manualmente.'
+      );
+    }
+    return trimmed;
+  }
+
+  if (ext === 'docx' || ext === 'doc') {
+    onProgress('Cargando motor Word…');
+    const mammoth = await loadMammoth();
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return result.value;
+  }
+
+  throw new Error('Formato no compatible: .' + ext + '. Usa PDF, DOCX, DOC, TXT o CSV.');
+}
+
+// ─── Plantillas de ejemplo ────────────────────────────────────────────────────
+const TEMPLATE_CATS = [
+  { id: 'all', label: 'Todos' },
+  { id: 'rrhh', label: '💼 RRHH' },
+  { id: 'legal', label: '⚖️ Legal' },
+  { id: 'salud', label: '🏥 Salud' },
+  { id: 'finanzas', label: '💰 Finanzas' },
+  { id: 'tech', label: '💻 Tecnología' },
+  { id: 'educacion', label: '🎓 Educación' },
+  { id: 'operaciones', label: '🏢 Operaciones' },
+  { id: 'marketing', label: '🌐 Marketing' },
+];
+
+const TEMPLATES = [
+  // ── RRHH ──
+  { id: 'contrato-laboral', cat: 'rrhh', icon: '📋', name: 'Contrato laboral',
+    desc: 'Nombre, CC, NIT, IBAN, dirección, email, teléfono',
+    cats: ['email','fiscal','financial','phone','address','company'],
+    text: `CONTRATO INDIVIDUAL DE TRABAJO
+
+En Bogotá, a 15/03/2024, comparecen:
+
+EMPLEADOR: Soluciones Digitales Andinas S.A.S., NIT 900.234.567-1, representada por Andrea Morales Jiménez, C.C. 52.891.234, Gerente General. Dirección: Calle 93 #15-32, Bogotá.
+
+TRABAJADOR: Carlos Alberto Mendoza Restrepo, C.C. 1.032.456.789. Dirección: Av. Caracas #45-67, Apto 302, Bogotá. Correo: carlos.mendoza@gmail.com. Tel: +57 310 456 7890.
+
+Cargo: Desarrollador Senior de Software. Inicio: 1 de abril de 2024.
+Salario: $4.200.000 COP/mes — cuenta corriente No. 456-789012-34, Banco Davivienda.
+IBAN: ES91 2100 0418 4502 0005 1332.
+
+Firma empleador: Andrea Morales Jiménez
+Firma trabajador: Carlos Alberto Mendoza Restrepo` },
+
+  { id: 'carta-oferta', cat: 'rrhh', icon: '📨', name: 'Carta de oferta laboral',
+    desc: 'Nombre, cargo, salario, email, teléfono, dirección',
+    cats: ['email','phone','money','address','company'],
+    text: `Bogotá, 8 de abril de 2024
+
+Estimada Laura Cristina Vásquez Torres:
+
+Nos complace extenderle una oferta formal para el cargo de Directora de Marketing Digital en Grupo Innovatech Latinoamérica S.A.S.
+
+Detalles:
+- Salario: $6.500.000 COP/mes
+- Inicio: 20 de abril de 2024
+- Oficina: Carrera 7 #71-21, Piso 8, Bogotá
+
+Confirme su aceptación antes del 12 de abril respondiendo a este correo.
+
+Contacto RRHH:
+María Alejandra Cifuentes — Directora de RRHH
+maria.cifuentes@grupoinnovatech.com
++57 601 234 5678 ext. 201` },
+
+  { id: 'evaluacion-desempeno', cat: 'rrhh', icon: '📊', name: 'Evaluación de desempeño',
+    desc: 'Nombre empleado, evaluador, email, bonificación, cuenta bancaria',
+    cats: ['email','phone','money','financial'],
+    text: `EVALUACIÓN DE DESEMPEÑO — PERÍODO ENERO–JUNIO 2024
+
+Empleado: Roberto Andrés Vargas Salcedo
+Cargo: Analista de Datos Senior
+Evaluador: Diana Patricia Rondón Martínez, Gerente de BI
+Correo evaluado: roberto.vargas@datacore.co
+Teléfono: +57 315 678 9012
+
+RESULTADOS:
+- Proyectos completados a tiempo: 94%
+- Satisfacción cliente interno: 4.7/5
+- Objetivos alcanzados: 11 de 12
+
+COMENTARIOS: Roberto permitió identificar un incremento de ingresos de $340.000.000 en Q2 gracias a su análisis del segmento premium.
+
+Bono recomendado: $1.200.000 COP
+Código empleado: EMP-2021-0347
+Cuenta depósito: 234-567890-12, Banco de Bogotá` },
+
+  { id: 'liquidacion-laboral', cat: 'rrhh', icon: '💵', name: 'Liquidación laboral',
+    desc: 'CC, email, teléfono, cuenta IBAN, montos de liquidación',
+    cats: ['email','phone','fiscal','financial','money','address'],
+    text: `LIQUIDACIÓN DE CONTRATO DE TRABAJO
+
+Empleado: Miguel Antonio Herrera Pinzón
+C.C.: 79.456.123 de Bogotá
+Correo: miguel.herrera.pz@hotmail.com
+Teléfono: +57 317 890 1234
+Dirección: Transversal 78 #68-45, Apto 201, Bogotá
+Fecha ingreso: 15/02/2021 — Fecha retiro: 31/03/2024
+
+Salario base: $3.800.000/mes
+
+CONCEPTOS:
+- Cesantías: $3.966.666
+- Intereses cesantías: $475.999
+- Prima: $316.666
+- Vacaciones: $633.333
+TOTAL: $5.392.664
+
+IBAN: ES91 2100 0418 4502 0005 1332
+Cuenta: Bancolombia ahorros 234-123456-78` },
+
+  { id: 'referencia-laboral', cat: 'rrhh', icon: '🏅', name: 'Carta de referencia laboral',
+    desc: 'Nombre, NIT empresa, CC trabajador, email, teléfono, montos',
+    cats: ['email','phone','fiscal','money','address','company'],
+    text: `Bogotá, 5 de mayo de 2024
+
+A quien corresponda:
+
+Tecnologías Avanzadas del Caribe S.A.S., NIT 830.456.789-2, certifica que Valentina Ospina Guerrero, C.C. 1.098.765.432, se desempeñó como Jefa de Proyectos de Transformación Digital desde el 1 de marzo de 2020 hasta el 28 de febrero de 2024.
+
+Gestionó proyectos con presupuestos de hasta $450.000.000 COP anuales con resultados sobresalientes.
+
+Daniel Ernesto Suárez Moreno
+Gerente de Recursos Humanos
+daniel.suarez@tecavanzadas.com
++57 4 567 8901
+Carrera 43 #1-50, Medellín` },
+
+  { id: 'permiso-medico', cat: 'rrhh', icon: '🏥', name: 'Solicitud de permiso médico',
+    desc: 'CC, cargo, email, teléfono, código de reposo',
+    cats: ['email','phone','fiscal','date'],
+    text: `Medellín, 3 de junio de 2024
+
+Señores RECURSOS HUMANOS
+Distribuidora Nacional de Alimentos S.A.
+
+Yo, Óscar Julián Ramírez Cardona, C.C. 98.765.432, Supervisor de Planta, solicito permiso médico remunerado del 10 al 14 de junio de 2024.
+
+Médico: Dr. Andrés Felipe Gómez Ríos — Clínica Las Américas
+Diagnóstico: L4.2 (confidencial)
+Teléfono: +57 312 345 6789
+Correo: oscar.ramirez.c@gmail.com
+
+Adjunto reposo No. RM-2024-456123 expedido el 2 de junio de 2024.
+
+Óscar Julián Ramírez Cardona — Código: EMP-2019-1123` },
+
+  // ── LEGAL ──
+  { id: 'contrato-servicios', cat: 'legal', icon: '📝', name: 'Contrato de servicios',
+    desc: 'NIT, CC, email, teléfono, cuenta bancaria, IBAN, dirección',
+    cats: ['email','phone','fiscal','financial','money','address','company'],
+    text: `CONTRATO DE PRESTACIÓN DE SERVICIOS PROFESIONALES
+
+CONTRATANTE: Constructora Bolívar Andina S.A., NIT 860.012.345-6, Calle 72 #10-07 Piso 12, Bogotá. Representada por Hernán Darío Castaño Arango, C.C. 79.012.345, Gerente General.
+
+CONTRATISTA: Andrea Lucía Montoya Parra, RUT 42.890.123-5, Consultora Financiera. Av. El Dorado #85-38, Apto 504, Bogotá. andrea.montoya@consultora.co — +57 314 567 8901.
+
+OBJETO: Auditoría financiera por 4 meses.
+VALOR: $12.000.000 COP/mes.
+Cuenta corriente No. 123-456789-01, Banco BBVA.
+IBAN: ES91 2100 0418 4502 0005 1332.
+DURACIÓN: 1 de julio al 31 de octubre de 2024.` },
+
+  { id: 'nda', cat: 'legal', icon: '🤫', name: 'Acuerdo de confidencialidad (NDA)',
+    desc: 'NIT, CC, email, teléfono, IP de firma, penalidades',
+    cats: ['email','phone','fiscal','ip','money','company','date'],
+    text: `ACUERDO DE CONFIDENCIALIDAD (NDA)
+
+PARTE A: Biotech Solutions Latam S.A., NIT 900.567.890-3. Representada por Dra. Catalina Bermúdez Vargas — catalina.bermudez@biotechlatam.com — +57 1 234 5678.
+
+PARTE B: Felipe Augusto Reyes Domínguez, C.C. 80.234.567. f.reyes.inv@proton.me — +57 318 901 2345.
+
+INFORMACIÓN CONFIDENCIAL: Fórmulas, datos de pacientes del Ensayo EC-2024-031, resultados preliminares.
+
+PENALIDAD: $50.000.000 COP + daños comprobables.
+VIGENCIA: 5 años desde la firma.
+
+Firma electrónica — folio: NDA-2024-00789
+IP de firma: 190.24.189.45 — Fecha: 15/05/2024 09:42:33 UTC` },
+
+  { id: 'poder-notarial', cat: 'legal', icon: '🔏', name: 'Poder notarial',
+    desc: 'CC, dirección, email, teléfono, cuenta bancaria, monto',
+    cats: ['email','phone','fiscal','financial','money','address','date'],
+    text: `PODER ESPECIAL
+
+Yo, GLORIA PATRICIA JIMÉNEZ URIBE, C.C. 41.567.890 de Bogotá. Domicilio: Carrera 15 #85-32, Apto 601, Bogotá. gloria.jimenez.u@gmail.com — +57 310 234 5678.
+
+Confiero PODER ESPECIAL a mi esposo JORGE ENRIQUE PEDRAZA SILVA, C.C. 19.234.567, para firmar escritura de compraventa del inmueble en Calle 127 #13-25, Apto 302, Bogotá (matrícula inmobiliaria: 50N-123456).
+
+Precio: $380.000.000 COP.
+Cuenta receptora: 567-890123-45, Banco Davivienda.
+
+Bogotá, 20 de marzo de 2024.` },
+
+  { id: 'intimacion-legal', cat: 'legal', icon: '⚠️', name: 'Carta de intimación de pago',
+    desc: 'Nombre, CC, dirección, NIT acreedor, IBAN, monto vencido',
+    cats: ['email','phone','fiscal','financial','money','address','company','date'],
+    text: `Cali, 12 de abril de 2024
+
+Señor RAMIRO ANTONIO CIFUENTES MORA
+C.C. 14.890.123 — Calle 5 #23-45, Apto 201, Cali
+
+Ref.: INTIMACIÓN DE PAGO — OBLIGACIÓN VENCIDA
+
+En nombre de IMPORTADORA DEL PACÍFICO S.A.S., NIT 805.234.567-8, le intimamos el pago de $23.500.000 COP (Factura FCV-2024-001234, vence 15/02/2024).
+
+Plazo: 5 días hábiles desde recepción.
+Cuenta: Banco de Occidente, cta. cte. 112-345678-90.
+IBAN: ES91 2100 0418 4502 0005 1332.
+
+Dra. Adriana Marcela Solano Ríos
+adriana.solano@solanoasociados.com — +57 2 890 1234` },
+
+  { id: 'acta-directorio', cat: 'legal', icon: '🏛️', name: 'Acta de Junta Directiva',
+    desc: 'Nombres, CC, emails, NIT empresa, montos aprobados, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `ACTA JUNTA DIRECTIVA No. 24 — GRUPO EMPRESARIAL DEL NORTE S.A.
+NIT 890.123.456-7 — Calle 80 #51-18, Barranquilla — 25/03/2024
+
+ASISTENTES:
+- Roberto Luis Pineda Ospina, C.C. 72.345.678 — r.pineda@gruponorte.com
+- Sandra Milena Torres Barrios, C.C. 32.567.890 — s.torres@gruponorte.com
+- Juan Camilo Arias Montiel, C.C. 8.901.234 — j.arias@gruponorte.com
+- Patricia Ximena Fuentes Galindo, C.C. 22.456.789 — p.fuentes@gruponorte.com
+
+ACUERDOS:
+1. Presupuesto Q2: $1.200.000.000 COP — unánime.
+2. Crédito Bancolombia: $500.000.000 — cuenta 234-789012-34.
+3. Auditoría externa: Deloitte Colombia.
+
+Secretaria: mariela.rios@gruponorte.com` },
+
+  { id: 'cesion-derechos', cat: 'legal', icon: '©️', name: 'Cesión de derechos de autor',
+    desc: 'CC, NIT, emails, teléfonos, cuenta bancaria, monto',
+    cats: ['email','phone','fiscal','financial','money','address','company'],
+    text: `CONTRATO DE CESIÓN DE DERECHOS DE AUTOR
+
+CEDENTE: Sebastián Esteban Morales Gutiérrez, C.C. 1.012.345.678. Carrera 70 #48-32, Medellín. smorales.design@gmail.com — +57 311 234 5678.
+
+CESIONARIO: Agencia Creativa Nómada S.A.S., NIT 900.789.012-4, Calle 10 #43-32, El Poblado. Representada por Nicolás Andrés Bedoya Rivera, C.C. 98.012.345. n.bedoya@nomada.co.
+
+OBJETO: Cesión total y exclusiva del sistema de identidad visual "Zenith Brand System 2024" desarrollado para Zenith Tech Colombia S.A.S., NIT 900.456.789-1.
+
+CONTRAPRESTACIÓN: $8.500.000 COP
+Cuenta: Banco Popular, ahorros 123-456789-01.
+Medellín, 10 de mayo de 2024.` },
+
+  // ── SALUD ──
+  { id: 'ficha-medica', cat: 'salud', icon: '🩺', name: 'Ficha médica de admisión',
+    desc: 'Nombre, CC, EPS, email, teléfono, dirección, cuenta reembolso',
+    cats: ['email','phone','fiscal','financial','address','date'],
+    text: `FICHA DE ADMISIÓN — CLÍNICA SANTA MARÍA DE LA PAZ
+Historia: HCL-2024-089234 — Fecha: 18 de abril de 2024
+
+PACIENTE: Luisa Fernanda Quintero Arango
+Fecha de nacimiento: 7 de septiembre de 1985
+C.C.: 43.567.890 — Medellín
+EPS: SURA — Afiliado No. 890123456
+Tel: +57 313 456 7890 — luisa.quintero85@gmail.com
+Dirección: Calle 37 #67-12, Apto 503, Medellín
+Emergencias: Andrés Quintero Arango +57 315 678 9012
+
+ANTECEDENTES: Alergias a penicilina e ibuprofeno. Apendicectomía 2009.
+Medicamentos: Levotiroxina 50mcg.
+
+Póliza: POL-2023-567890, Seguros Bolívar
+Cuenta reembolso: 890-123456-78, Banco de Bogotá` },
+
+  { id: 'receta-medica', cat: 'salud', icon: '💊', name: 'Receta médica',
+    desc: 'Nombre médico, paciente, CC, EPS, diagnóstico, cita',
+    cats: ['email','phone','fiscal','date','address'],
+    text: `RECETA MÉDICA
+
+Dr. Alejandro José Moreno Patiño — Medicina Interna — Reg. RM-45678
+Clínica San Rafael — Calle 127 #21-41, Bogotá
+alejandro.moreno@clinicasanrafael.com — +57 601 567 8901
+Fecha: 22 de mayo de 2024
+
+PACIENTE: Marta Inés Rodríguez Villamizar
+C.C.: 51.890.234 — Fecha nacimiento: 14/02/1972
+EPS: Compensar — No. afiliado: 345678901
+
+PRESCRIPCIÓN:
+1. Amoxicilina 500mg — 1 cápsula c/8h por 7 días
+2. Ibuprofeno 400mg — 1 tableta c/8h por 5 días
+3. Omeprazol 20mg — 1 cápsula en ayunas por 14 días
+
+Diagnóstico: J06.9 — Infección aguda vías respiratorias
+Próxima cita: 5 de junio de 2024 — 3:30 pm` },
+
+  { id: 'epicrisis', cat: 'salud', icon: '🏨', name: 'Epicrisis / resumen hospitalario',
+    desc: 'Nombre, CC, EPS, médico, email, teléfono, diagnóstico',
+    cats: ['email','phone','fiscal','address','date'],
+    text: `EPICRISIS — RESUMEN DE HOSPITALIZACIÓN
+Hospital Universitario del Valle — Historia: HCL-HUV-2024-034567
+
+PACIENTE: Fernando Javier Caicedo Mosquera
+Nacimiento: 23 de noviembre de 1958 — C.C.: 16.789.012 — Cali
+Tel: +57 312 789 0123 — Dirección: Carrera 23 #5-67, Cali
+EPS: Coomeva — Afiliado No. 567890123
+Ingreso: 3/04/2024 — Egreso: 8/04/2024
+
+DIAGNÓSTICO: I21.0 — Infarto agudo de miocardio pared anterior
+PROCEDIMIENTO: Coronariografía + angioplastia con 2 stents DES
+
+Médico: Dra. Ana Lucía Vargas Sandoval — Cardiología Intervencionista
+ana.vargas@hospitalvalleuni.gov.co
+
+MEDICAMENTOS AL ALTA: Clopidogrel 75mg, AAS 100mg, Atorvastatina 40mg` },
+
+  { id: 'historia-psicologica', cat: 'salud', icon: '🧠', name: 'Nota de sesión psicológica',
+    desc: 'Psicólogo, paciente, email, teléfono, diagnóstico DSM-5',
+    cats: ['email','phone','date','address'],
+    text: `NOTA DE SESIÓN — PSICOLOGÍA CLÍNICA
+
+Psicólogo: Mg. David Santiago Herrera Palomino — Reg. PP-78901
+Av. 68 #46-31, Of. 302, Bogotá
+david.herrera.psi@gmail.com — +57 320 890 1234
+Fecha: 9 de mayo de 2024 — Sesión No. 7
+
+PACIENTE: Claudia Esperanza Nieto Rueda
+Nacimiento: 16 de julio de 1990
+Tel: +57 321 012 3456 — claudia.nieto.r@outlook.com
+Emergencia: Eduardo Nieto Rueda — +57 317 890 1234
+
+DIAGNÓSTICO DSM-5: F41.1 — Trastorno de ansiedad generalizada
+EVOLUCIÓN: Mejoría en manejo de activación fisiológica.
+PLAN: Continuar sesiones semanales. Remitir a psiquiatría para evaluación farmacológica.` },
+
+  { id: 'referencia-especialista', cat: 'salud', icon: '🔬', name: 'Referencia a especialista',
+    desc: 'Nombre médico, paciente, CC, EPS, email, teléfono',
+    cats: ['email','phone','fiscal','date','address'],
+    text: `Bogotá, 14 de marzo de 2024
+
+Dr. Carlos Alberto Jiménez Rico — Neurología
+Clínica del Country — carlos.jimenez@clinicadelcountry.com
+
+Estimado Dr. Jiménez:
+
+Remito a Arturo Enrique Pulido Mora, C.C. 79.012.345, nacimiento 3/04/1970, EPS Sanitas (012345678). Tel: +57 310 012 3456. a.pulido.mora@hotmail.com.
+
+MOTIVO: Cefalea crónica 3 meses, sin respuesta a analgésicos. Fotofobia, fonofobia, náuseas. TAC sin alteraciones (TAC-2024-34567, 8 de marzo de 2024).
+
+Antecedentes: HTA con Losartán 50mg.
+
+Dr. Manuel Ignacio Vargas Torres — Médico general
+Reg: RM-23456 — manuel.vargas@mediconsulta.co` },
+
+  { id: 'alta-hospitalaria', cat: 'salud', icon: '🏠', name: 'Indicaciones de alta hospitalaria',
+    desc: 'Nombre paciente, CC, email, teléfono, médico, EPS, autorización',
+    cats: ['email','phone','fiscal','date'],
+    text: `INDICACIONES DE EGRESO HOSPITALARIO
+
+Paciente: Sofía Alejandra Morales Duque — C.C.: 1.030.789.012
+Tel: +57 316 789 0123 — sofia.morales.d@gmail.com
+Alta: 19 de junio de 2024
+Médico: Dra. Laura Milena Gómez Castro — Ginecología
+
+DIAGNÓSTICO: Parto vaginal eutócico — RN vivo, 3.250g, APGAR 9/10
+
+INDICACIONES:
+1. Reposo relativo 15 días
+2. Ibuprofeno 600mg c/8h con alimentos, 5 días
+3. Control en 10 días — citas: +57 601 890 1234
+
+EPS: Nueva EPS — Autorización: AUTH-2024-890123
+Acudir a urgencias si: fiebre >38°C, sangrado abundante.` },
+
+  // ── FINANZAS ──
+  { id: 'factura', cat: 'finanzas', icon: '🧾', name: 'Factura electrónica comercial',
+    desc: 'NIT emisor/receptor, emails, IBAN, cuenta bancaria, montos',
+    cats: ['email','phone','fiscal','financial','money','address','company'],
+    text: `FACTURA ELECTRÓNICA No. FEV-2024-003456
+Fecha: 30 de mayo de 2024 — Vence: 29/06/2024
+
+EMISOR: Soluciones Empresariales Integrales S.A.S.
+NIT: 900.345.678-9 — Calle 100 #8A-55, Of. 602, Bogotá
+facturacion@solempresariales.co — +57 601 890 1234
+
+ADQUIRIENTE: Distribuidora del Atlántico S.A.
+NIT: 800.456.789-2 — cuentas@distatlantico.com
+
+ÍTEMS:
+1. Licencia ERP SIIGO x5 usuarios — $4.500.000
+2. Implementación y migración — $2.800.000
+3. Capacitación 20h — $1.200.000
+Subtotal: $8.500.000 | IVA 19%: $1.615.000
+TOTAL: $10.115.000
+
+Pago: Bancolombia cta. cte. 234-567890-12
+IBAN: ES91 2100 0418 4502 0005 1332` },
+
+  { id: 'estado-cuenta', cat: 'finanzas', icon: '🏦', name: 'Estado de cuenta bancario',
+    desc: 'NIT, cuenta, IBAN, email asesor, tarjeta de débito, movimientos',
+    cats: ['email','phone','fiscal','financial','money','company','date'],
+    text: `ESTADO DE CUENTA — JUNIO 2024
+
+Titular: Hernández Ríos Inversiones S.A.S. — NIT: 900.678.901-2
+Cuenta corriente: 456-789012-34 — Banco de Bogotá, Sucursal Chapinero
+
+SALDO INICIAL: $45.678.900
+
+MOVIMIENTOS:
+03/06 — Nómina empleados — Débito: $12.345.000
+08/06 — Transferencia (NIT 800.234.567) — Crédito: $8.900.000
+15/06 — Cuota crédito CR-2022-056789 — Débito: $2.345.000
+22/06 — GMF 4x1000 — Débito: $48.678
+28/06 — Recaudo FV-2024-00789 — Crédito: $15.600.000
+
+SALDO FINAL: $55.440.222
+
+Asesora: María Teresa Aguirre — maria.aguirre@bancobogota.com — +57 601 234 5678 ext. 456
+Tarjeta débito: 4532 1234 5678 9012` },
+
+  { id: 'cotizacion', cat: 'finanzas', icon: '💼', name: 'Cotización de servicios',
+    desc: 'NIT proveedor/cliente, emails, teléfonos, montos, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','company','date'],
+    text: `COTIZACIÓN No. COT-2024-00891
+Fecha: 3 de junio de 2024 — Válida hasta: 3 de julio de 2024
+
+PROPONENTE: Arquitectura & Diseño Contemporáneo S.A.S. — NIT: 900.567.123-8
+Arq. Daniela Alejandra Ríos Molina — daniela.rios@adcstudio.co — +57 318 234 5678
+
+CLIENTE: Hotel Boutique Casa Victoria S.A.S. — NIT: 890.789.456-3
+Gerardo Antonio Salas Díaz — gerardo.salas@casavictoria.com
+
+SERVICIOS:
+1. Diseño interiores lobby + 12 habitaciones: $45.000.000
+2. Supervisión de obra (4 meses): $12.000.000
+3. Compras y suministros: $78.000.000
+TOTAL ESTIMADO: $135.000.000
+
+Forma de pago: 30% anticipo + 30% avance + 40% entrega
+Cuenta: BBVA Colombia cta. cte. 123-890456-78` },
+
+  { id: 'declaracion-fiscal', cat: 'finanzas', icon: '📑', name: 'Declaración de retención en la fuente',
+    desc: 'NIT contribuyente, email responsable, CC, montos, cuenta DIAN',
+    cats: ['email','phone','fiscal','money','company'],
+    text: `DECLARACIÓN DE RETENCIÓN EN LA FUENTE — Mayo 2024
+
+Contribuyente: Comercializadora Andina de Productos Ltda.
+NIT: 800.123.456-7 — Carrera 13 #26-45, Bogotá
+Responsable: Patricia Lorena Álvarez Suárez, C.C. 52.345.678
+patricia.alvarez@comercializadoraandina.com — +57 601 456 7890
+
+RETENCIONES:
+- Servicios profesionales (Art. 392): $2.340.000
+- Compras (Art. 401): $890.000
+- Arrendamientos (Art. 401): $450.000
+TOTAL A PAGAR: $3.680.000
+
+Referencia pago electrónico: 2024-05-RET-789012
+Banco recaudador: Davivienda, sucursal Chapinero
+Cuenta: 890-012345-67` },
+
+  { id: 'auditoria', cat: 'finanzas', icon: '🔍', name: 'Informe de auditoría interna',
+    desc: 'NIT, auditor, CC, emails, montos, cuentas bancarias sospechosas',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `INFORME AUDITORÍA INTERNA — TESORERÍA Q1 2024
+
+Empresa: Grupo Constructor Pacífico S.A. — NIT 860.789.012-3
+Auditor: Ricardo José Parra Salinas, C.C. 80.678.901
+ricardo.parra@auditoriagcp.com — +57 601 789 0123
+
+HALLAZGOS CRÍTICOS:
+1. Cheque No. 001234 por $45.000.000 emitido a Insumos Técnicos S.A.S. (NIT 900.234.567-1) sin factura soporte — RIESGO ALTO.
+2. Transferencia a cuenta 567-890123-45 (Luis Alberto Contreras Ríos, C.C. 79.456.123) por $12.800.000 sin autorización del CFO — INVESTIGAR.
+3. Caja menor $4.230.000 sin arqueo — RIESGO MEDIO.
+
+RECOMENDACIÓN: Doble firma para pagos >$5.000.000.
+Próxima auditoría: septiembre 2024.` },
+
+  { id: 'gastos-viaje', cat: 'finanzas', icon: '✈️', name: 'Liquidación de gastos de viaje',
+    desc: 'CC, email, teléfono, tarjeta corporativa, RFC cliente, montos',
+    cats: ['email','phone','fiscal','financial','money','company','date'],
+    text: `LIQUIDACIÓN DE GASTOS — Ciudad de México, 12–16 mayo 2024
+
+VIAJERO: Nicolás Ernesto Castañeda Vargas — Director Comercial
+C.C.: 79.789.012 — n.castaneda@grupoexporta.co — +57 315 901 2345
+
+GASTOS:
+- Tiquetes BOG-MEX-BOG: $2.890.000
+- Hotel City Express (4 noches): $1.240.000
+- Alimentación: $456.000
+- Transporte/Uber: $189.000
+- Representación (cliente Importaciones Azteca S.A. — RFC: IAZ850315KT8): $634.000
+TOTAL: $5.409.000
+
+Anticipo empresa: $4.000.000
+DIFERENCIA A REINTEGRAR: $1.409.000
+
+Cuenta reintegro: 234-012345-67, Banco Popular
+Tarjeta corporativa usada: 5412 7534 8901 2345` },
+
+  // ── TECNOLOGÍA ──
+  { id: 'log-sistema', cat: 'tech', icon: '📟', name: 'Log de sistema / error crítico',
+    desc: 'Credenciales, IPs, URLs internas, emails, tokens, API keys',
+    cats: ['credentials','url','email','phone','ip'],
+    text: `[2024-06-01 03:47:22 UTC] CRITICAL — api-gateway-prod-01
+Host: 10.0.1.45 — Service: payment-processor v2.3.1
+ERROR: Database connection timeout
+  Connection: postgresql://admin:P@ssw0rd_Prod_2024!@db-master.internal:5432/payments_db
+  Replica: 192.168.10.25:5432
+
+[2024-06-01 03:47:25 UTC] ALERT enviado a monitoring@infrateam.io
+Slack webhook: https://hooks.slack.com/services/T01ABC/B02DEF/xyzTokenHere
+PagerDuty: api_key=pd_api_key_4Xz7mR9kLp2nQsW8vJtY1aB3cD
+On-call: Andrés Mauricio Ríos — andres.rios@techcorp.com — +57 312 456 7890
+
+[2024-06-01 03:48:01 UTC] INFO — failover iniciado
+Conexión redirigida a: 192.168.10.26:5432
+Bearer rotado: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.Xyz` },
+
+  { id: 'incidente-seguridad', cat: 'tech', icon: '🚨', name: 'Reporte de incidente de seguridad',
+    desc: 'IP atacante, credenciales comprometidas, API key, email, teléfono',
+    cats: ['credentials','url','email','phone','ip','date'],
+    text: `REPORTE DE INCIDENTE — CONFIDENCIAL — Ref.: INC-SEC-2024-0089
+
+Detectado: 15 de mayo de 2024 — 14:23 hrs (SIEM Splunk)
+IP origen del ataque: 185.234.219.45
+Servidor afectado: prod-web-02 (192.168.1.102)
+
+CREDENCIALES COMPROMETIDAS:
+Usuario: admin.portal@empresa.com
+Contraseña: Empresa2024!
+API key expuesta: sk_live_EJEMPLO_FICTICIO_NO_REAL_36
+
+ACCIONES:
+1. IP 185.234.219.45 bloqueada en firewall — 14:28 hrs
+2. Reset credenciales — responsable: javier.mendez@empresa.com — +57 601 234 5678
+3. Notificado CSIRT Colombia: csirt@colcert.gov.co
+4. Portal reporte: https://colcert.gov.co/incidentes/reporte
+
+Investigadora: Sandra Lorena Ávila — sandra.avila@sec.empresa.com` },
+
+  { id: 'config-servidor', cat: 'tech', icon: '⚙️', name: 'Configuración de servidor (DevOps)',
+    desc: 'Passwords, API keys, IPs internas, AWS keys, tokens SMTP',
+    cats: ['credentials','url','email','phone','ip'],
+    text: `# PRODUCCIÓN — config.yml — CONFIDENCIAL
+# Última actualización por devops@empresa.com
+
+database:
+  host: db-prod.empresa.internal
+  port: 5432
+  user: db_admin_prod
+  password: "Pr0d_DB_S3cur3!2024"
+  replica_host: 192.168.20.10
+
+redis:
+  host: 10.0.2.45
+  auth: "R3d1s_Auth_T0k3n_2024!"
+
+aws:
+  access_key_id: AKIAIOSFODNN7EXAMPLE
+  secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+  s3_bucket: empresa-prod-files
+
+smtp:
+  host: smtp.sendgrid.net
+  password: SG.aBcDeFgHiJkLmNoPqRsTuVwXyZ.123456789abcdefghijklmnop
+
+# Contacto: Pedro Arturo Llanos — pedro.llanos@empresa.com — +57 310 567 8901
+# IP gestión: 190.85.45.123` },
+
+  { id: 'bug-report', cat: 'tech', icon: '🐛', name: 'Bug report / ticket de soporte',
+    desc: 'Email usuario, IP sesión, credenciales, URL interna, teléfono',
+    cats: ['credentials','url','email','phone','ip'],
+    text: `TICKET #TKT-2024-089234 — Prioridad: ALTA — CRM v4.2
+Reportado: 2024-05-28 16:45
+
+USUARIO: Laura García Mendez — laura.garcia@distribuidora.com — +57 316 234 5678
+IP de sesión: 192.168.5.78 — Chrome 124.0 / Windows 11
+
+DESCRIPCIÓN: Al exportar cartera de clientes (>500 registros), el sistema falla con error 500 cerrando la sesión. Afecta 847 clientes con RUCs, emails y montos.
+
+PASOS PARA REPRODUCIR:
+1. Login: admin_crm / Admin_CRM2024!
+2. Módulo Cartera → Exportar → CSV → Rango: 2024-01-01 al 2024-05-28
+3. Error 500 al presionar "Generar reporte"
+
+LOG: https://logs.empresa.internal/crm/error-2024-05-28-16-45
+
+Asignado a: equipo-backend@techsupport.empresa.com` },
+
+  { id: 'api-credentials', cat: 'tech', icon: '🔑', name: 'Credenciales de API / integraciones',
+    desc: 'API keys, tokens, webhooks, URLs, datos del responsable técnico',
+    cats: ['credentials','url','email','phone','ip'],
+    text: `CREDENCIALES INTEGRACIÓN PAGOS — PRODUCCIÓN
+Responsable: Julián David Ospina — julian.ospina@devteam.co — +57 314 789 0123
+
+STRIPE:
+  Secret key: sk_live_EJEMPLO_FICTICIO_NO_REAL_34
+  Webhook secret: whsec_aBcDeFgHiJkLmNoPqRsT
+
+MERCADOPAGO:
+  Access token: APP_USR-1234567890-060124-abcdefghijklmn-987654321
+  IPN URL: https://api.empresa.com/webhooks/mp
+
+PAYPAL:
+  Client ID: AZDxjDScFpQtjWTOzbaki6qwGLuWsprCFvnNtaNG8G
+  Secret: EGnHDxD_QRVEDQejKh4FTugroO0wMKFEbdN4dZbOGkM
+
+SENDGRID:
+  api_key = SG.aBcDeFgHiJkLmNoPqRsTuVwXyZ.123456789abc
+
+Servidor API: 190.24.78.45:8080
+URL base: https://api.empresa.com/v2/` },
+
+  { id: 'reporte-accesos', cat: 'tech', icon: '👤', name: 'Reporte de accesos / usuarios del sistema',
+    desc: 'Emails, contraseñas, IPs de acceso, CC usuarios, teléfonos',
+    cats: ['credentials','email','phone','fiscal','ip'],
+    text: `REPORTE DE ACCESOS ACTIVOS — SISTEMA ERP
+Generado: 2024-06-15 por Carolina Amaya — carol.amaya@it.empresa.com
+
+USUARIOS PRIVILEGIADOS:
+1. javier.torres@empresa.com — Admin — Último acceso: 2024-06-15 08:23 — IP: 190.85.45.67
+2. admin_finanzas (Pedro Ruiz, C.C. 79.456.123) — +57 310 890 1234 — Módulo financiero
+3. gerencia@empresa.com — CEO Dashboard — Password temporal: Temp2024$Admin
+
+ACCESOS SOSPECHOSOS:
+- 2024-06-12 02:34 UTC — ana.reyes@empresa.com — IP: 45.147.230.89 (Rusia) — BLOQUEADO
+- 2024-06-13 04:12 UTC — intentos x5 — usuario: root — IP: 185.220.101.45
+
+Contacto seguridad: juan.moreno@seguridad.empresa.com — +57 312 345 6789
+API key gestión: api_key=mgmt_aK9xPqR7nLt2mJ4vBs6wCe8yHf0dZi` },
+
+  // ── EDUCACIÓN ──
+  { id: 'expediente-academico', cat: 'educacion', icon: '🎓', name: 'Expediente académico universitario',
+    desc: 'Nombre, CC, emails institucional/personal, teléfono, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','address','date'],
+    text: `EXPEDIENTE ACADÉMICO — Universidad Tecnológica de Pereira
+
+ESTUDIANTE: Valentina Jaramillo Hoyos
+Código: UTP-2019-123456 — Programa: Ingeniería de Sistemas
+C.C.: 1.088.901.234 — Pereira
+Nacimiento: 22 de agosto de 2000
+v.jaramillo@utp.edu.co — vale.jaramillo.h@gmail.com
+Tel: +57 313 012 3456 — Calle 24 #8-35, Pereira
+
+HISTORIAL: Promedio 4.1/5.0 — 148/160 créditos aprobados
+
+FINANCIERO:
+Beca Excelencia 50% matrícula — Res. 234-2023
+Cuenta para giro: Bancolombia 567-012345-67
+Saldo pendiente: $1.234.000
+
+Registraduría: registros@utp.edu.co` },
+
+  { id: 'carta-recomendacion', cat: 'educacion', icon: '📜', name: 'Carta de recomendación académica',
+    desc: 'Nombre estudiante, CC, email, teléfono, profesor, institución',
+    cats: ['email','phone','fiscal','date'],
+    text: `Pereira, 8 de mayo de 2024
+
+Comité de Admisiones — Maestría en Inteligencia Artificial:
+
+Recomiendo a Mateo Alejandro Guerrero Zapata, C.C. 1.091.234.567.
+mateo.guerrero.z@utp.edu.co — +57 312 123 4567
+
+Obtuve calificaciones perfectas en Aprendizaje de Máquina y desarrolló "Detección de fraude financiero con LSTM" presentado en COLCOM 2023. Trabajo de grado calificado con Mención de Honor por los Dres. Patricia Londoño Ríos y Alejandro Murillo Vásquez.
+
+Candidato de primer nivel. No dudo en respaldarlo.
+
+PhD. Ramiro Antonio Ocampo Bedoya
+Profesor Titular — Ciencias de la Computación
+ramiro.ocampo@utp.edu.co — +57 6 234 5678` },
+
+  { id: 'matricula', cat: 'educacion', icon: '📋', name: 'Formulario de matrícula universitaria',
+    desc: 'CC, emails, teléfonos, dirección, cuenta ICETEX, información familiar',
+    cats: ['email','phone','fiscal','financial','address','date'],
+    text: `FORMULARIO DE MATRÍCULA 2024-II
+
+ESTUDIANTE: Ana Cristina Pedroza Valencia
+C.C.: 1.143.456.789 — Palmira — Nacimiento: 5/03/2004
+ana.pedroza.v@gmail.com — ana.pedroza@unicesar.edu.co
+Tel: +57 317 234 5678 — Calle 16 #7-45, Valledupar
+
+Programa: Contaduría Pública — 4° semestre — Código: UC-2022-078901
+
+FINANCIERO:
+Estrato: 2 — Crédito ICETEX — Radicado: ICT-2024-345678
+Valor matrícula: $2.345.000
+Cuenta ICETEX: Banco Agrario 890-123456-78
+
+ACUDIENTE: Gloria Estela Valencia Torres (madre)
+C.C.: 36.789.012 — +57 315 345 6789` },
+
+  { id: 'solicitud-beca', cat: 'educacion', icon: '🏆', name: 'Solicitud de beca universitaria',
+    desc: 'CC, email, teléfono, dirección, información familiar, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','address'],
+    text: `SOLICITUD BECA EXCELENCIA 2024-II — Universidad del Norte
+
+SOLICITANTE: Juan Sebastián Rodríguez Carmona
+C.C.: 1.127.890.123 — Barranquilla
+js.rodriguez.c@uninorte.edu.co — +57 314 456 7890
+Dirección: Cra. 38 #72B-45, Barranquilla
+Promedio: 4.6/5.0
+
+SITUACIÓN SOCIOECONÓMICA:
+Ingreso familiar: $2.800.000/mes — 5 personas en el hogar
+Responsable: María del Carmen Carmona Torres (madre), C.C. 32.456.789
++57 310 789 0123
+
+DOCUMENTOS: Certificado Notaría 15 de Barranquilla — NB15-2024-34567
+
+Cuenta para depósito de beca: Davivienda 123-456789-01` },
+
+  { id: 'acta-grado', cat: 'educacion', icon: '🎖️', name: 'Acta de grado / diploma universitario',
+    desc: 'CC, email, teléfono, nombres de rector y decano, registro institucional',
+    cats: ['email','phone','fiscal','date'],
+    text: `ACTA DE GRADO No. 2024-0567
+Universidad Pontificia Bolivariana — Seccional Bucaramanga
+Ceremonia: 15 de junio de 2024
+
+Título: INGENIERO ELECTRÓNICO
+Otorgado a: ANDRÉS CAMILO SOTO VALDIVIESO
+C.C.: 91.345.678 — Código: UPB-BGA-2019-00456
+Nacimiento: 17/01/1999
+andres.soto.v@gmail.com — +57 316 567 8901
+
+Promedio: 4.3/5.0 — Distinción: Cum Laude
+Trabajo de grado: "Detección de fallas en redes eléctricas rurales con IoT"
+
+Rector: Dr. Luis Guillermo Roa Benavides — rector@upbbucaramanga.edu.co
+Decana: Dra. Sara Milena Castellanos — s.castellanos@upb.edu.co
+Registradora: Mg. Marta Inés Porras Ríos
+
+Libro XIV — Folio: 234 — Registro: 2024-GR-00567` },
+
+  { id: 'certificado-estudios', cat: 'educacion', icon: '📄', name: 'Certificado de estudios (colegio)',
+    desc: 'T.I. alumno, emails padres, teléfonos, CC padres, nombre institución',
+    cats: ['email','phone','fiscal','date','address'],
+    text: `CERTIFICADO DE ESTUDIOS
+Institución Educativa Técnica Industrial de Duitama
+
+Certifica que DANIELA PAOLA HERRERA GUTIÉRREZ, T.I. 1.056.789.012 de Duitama, Boyacá, cursa grado 11° en 2024, modalidad técnica en Sistemas.
+
+Promedio primer período: 9.2/10.0
+
+Datos de contacto:
+herrera.familia.duitama@gmail.com
+Madre: Esmeralda Gutiérrez Torres, C.C. 40.890.123 — +57 311 678 9012
+Padre: Jorge Herrera Pineda, C.C. 7.456.789 — +57 312 789 0123
+
+Expedido para trámite de beca ICETEX.
+
+Rectora: Mg. Patricia Esperanza Moreno Camargo
++57 8 760 1234 — patricia.moreno@ietid.edu.co
+Duitama, 20 de mayo de 2024` },
+
+  // ── OPERACIONES ──
+  { id: 'propuesta-comercial', cat: 'operaciones', icon: '📊', name: 'Propuesta comercial',
+    desc: 'NIT, emails, teléfonos, montos, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','address','company'],
+    text: `PROPUESTA COMERCIAL No. PC-2024-0234 — 10 de junio de 2024
+
+CONSULTORES ESTRATÉGICOS DEL PACÍFICO S.A.S. — NIT: 900.890.123-5
+Mg. Sofía Cristina Arbeláez Muñoz
+sofia.arbelaez@consulestrategicos.co — +57 2 345 6789
+
+Para: AGROINDUSTRIAL NARIÑO S.A. — NIT: 891.234.567-8
+Ing. Carlos Humberto Pantoja Revelo — c.pantoja@agronariño.com
+
+OBJETO: Sistema de trazabilidad agroindustrial
+
+INVERSIÓN:
+- Diagnóstico y diseño: $18.000.000
+- Desarrollo e implementación (6 meses): $85.000.000
+- Licencias software (anual): $24.000.000
+- Capacitación año 1: $12.000.000
+TOTAL AÑO 1: $139.000.000
+
+Pago: 40% inicio + 30% implementación + 30% entrega
+Cuenta: Banco de Occidente cta. cte. 456-789012-34` },
+
+  { id: 'orden-compra', cat: 'operaciones', icon: '🛒', name: 'Orden de compra',
+    desc: 'NIT comprador/proveedor, emails, teléfonos, cuenta bancaria, dirección entrega',
+    cats: ['email','phone','fiscal','financial','money','address','company'],
+    text: `ORDEN DE COMPRA No. OC-2024-001567 — 5 de junio de 2024
+
+COMPRADOR: Supermercados del Caribe S.A. — NIT: 830.567.890-1
+Ana Lucía Mendoza — a.mendoza@supercaribebc.com — +57 5 345 6789
+Carrera 36 #72A-30, Barranquilla
+
+PROVEEDOR: Distribuidora Nacional de Alimentos S.A.S. — NIT: 900.123.456-7
+Pedro Miguel Solano — p.solano@distnaclimentos.com — +57 5 890 1234
+
+ÍTEMS:
+1. Leche entera x1000 L — $1.650.000
+2. Aceite girasol x500 unid — $2.250.000
+3. Arroz x300 bultos — $3.900.000
+TOTAL: $7.800.000
+
+Crédito 30 días. Cuenta: Bancolombia ahorros 567-890123-45
+Entrega: Bodega 3, Vía 40 #73-111, Barranquilla` },
+
+  { id: 'acta-reunion-ejecutiva', cat: 'operaciones', icon: '🤝', name: 'Acta de reunión ejecutiva',
+    desc: 'Nombres directivos, emails, teléfonos, NIT empresa, montos aprobados',
+    cats: ['email','phone','fiscal','money','address','company'],
+    text: `ACTA DE REUNIÓN DE GERENCIA — 18/06/2024
+Av. Calle 26 #69D-91, Torre B Piso 8, Bogotá
+
+ASISTENTES:
+- CEO: Mauricio Enrique Salazar Puerta — m.salazar@conglomgroup.com
+- COO: Patricia Helena Romero Viana — p.romero@conglomgroup.com
+- CFO: Guillermo Andrés Heredia Mora — g.heredia@conglomgroup.com — +57 601 456 7890
+- CMO: Lina María Oviedo Castillo — l.oviedo@conglomgroup.com
+
+TEMAS:
+1. Resultado Q2: ingresos $12.340.000.000 (+18% vs Q2-2023)
+2. Adquisición Distribuidora Norte Ltda. (NIT 800.789.012-3) por $4.500.000.000
+3. Expansión Ecuador — monto: $2.100.000.000 — RUC socio: 1790456789001
+
+Próxima reunión: 25 de junio — Convoca: p.romero@conglomgroup.com` },
+
+  { id: 'memo-ejecutivo', cat: 'operaciones', icon: '📧', name: 'Memorando ejecutivo interno',
+    desc: 'Emails directivos, CC, teléfonos, salarios, tarjeta corporativa',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `MEMORANDO INTERNO — CONFIDENCIAL
+Para: Todos los Directivos
+De: Alejandro Bernardo Gutiérrez Ríos, CEO
+alejandro.gutierrez@empresa.com — +57 601 789 0123
+Fecha: 4 de junio de 2024
+
+REESTRUCTURACIÓN ORGANIZACIONAL Q3 2024:
+
+1. Operaciones reportará a COO Marcela Patricia Rodríguez Leal — m.rodriguez@empresa.com.
+
+2. Director Regional Norte: Hernando Castro Pedraza, C.C. 79.012.678 — hernando.castro@empresa.com — +57 315 234 5678. Inicio: 1 de julio. Salario: $8.500.000/mes.
+
+3. Cuenta de representación incrementada a $2.000.000/mes.
+Tarjeta corporativa: 4929 1234 5678 0123 — límite $5.000.000.
+
+Tratar con estricta confidencialidad.` },
+
+  { id: 'plan-proyecto', cat: 'operaciones', icon: '📅', name: 'Plan de proyecto / Project Charter',
+    desc: 'NIT cliente, emails, teléfonos, presupuesto, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','address','company'],
+    text: `PROJECT CHARTER — TRANSFORMACIÓN DIGITAL LOGÍSTICA
+Versión 1.0 — 1 de junio de 2024
+
+CLIENTE: Logística Integral del Caribe S.A.S. — NIT: 900.234.890-6
+Sponsor: Claudia Milena Arias — c.arias@logicaribedc.com — +57 5 456 7890
+
+PM: Rafael Ignacio Mora Quintana — r.mora@pmconsulting.co — +57 312 890 1234
+
+ALCANCE: WMS en 3 bodegas (Barranquilla, Cartagena, Santa Marta)
+
+PRESUPUESTO: $380.000.000 COP
+- Software Infor WMS: $180.000.000
+- Infraestructura AWS: $65.000.000
+- Consultoría: $95.000.000
+- Capacitación: $40.000.000
+
+CRONOGRAMA: 1 julio – 31 diciembre 2024
+GO-LIVE: 2 de enero de 2025
+Cuenta proyecto: Davivienda cta. cte. 789-012345-67` },
+
+  { id: 'visita-comercial', cat: 'operaciones', icon: '🤝', name: 'Reporte de visita comercial',
+    desc: 'Vendedor, email, teléfono, NIT cliente, CC contacto, monto pedido',
+    cats: ['email','phone','fiscal','financial','money','address','company','date'],
+    text: `INFORME DE VISITA COMERCIAL — 27 de mayo de 2024
+
+Vendedor: Diana Catalina Morales Ospina
+diana.morales@comercialandes.com — +57 316 123 4567
+
+CLIENTE: Ferretería Hernández e Hijos Ltda. — NIT: 800.456.123-9
+Roberto Hernández Figueroa, C.C. 10.234.567
+Carrera 15 #48-22, Manizales
+rhernandez@ferrethijos.com — +57 6 890 1234
+
+MOTIVO: Renovación contrato suministro + nueva línea Herramientas Pro.
+
+RESULTADO: POSITIVO
+- Renovación 12 meses: $48.000.000/año
+- Interés herramientas premium: $12.600.000
+- Crédito 45 días aprobado — límite $15.000.000
+- Cuenta cliente: 234-567890-12
+
+PRÓXIMA ACCIÓN: Propuesta formal antes del 3 de junio.` },
+
+  { id: 'politica-interna', cat: 'operaciones', icon: '📏', name: 'Política interna de gastos',
+    desc: 'NIT empresa, emails responsables, teléfonos, montos de políticas',
+    cats: ['email','phone','fiscal','money','company'],
+    text: `POLÍTICA DE GASTOS Y VIAJES — Rev. 3 | 2024
+Corporación Empresarial Andina S.A. — NIT: 890.678.901-4
+Responsable: Esperanza Milena Fonseca Ruiz — e.fonseca@ceandinasa.com — +57 601 234 5678 ext. 301
+
+VIÁTICOS NACIONALES:
+- Alimentación: hasta $120.000/día
+- Hospedaje: hasta $280.000/noche (factura a nombre de la empresa)
+- Transporte urbano: hasta $80.000/día
+
+ANTICIPOS: Solicitar 5 días hábiles antes. Formato FO-ADM-012.
+Tesorería: Ana Isabel Guerrero — a.guerrero@ceandinasa.com — ext. 412
+
+TARJETAS CORPORATIVAS:
+Límite mensual: $2.000.000. Prohibido uso personal.
+Reporte al 15 de cada mes a a.guerrero@ceandinasa.com` },
+
+  // ── MARKETING ──
+  { id: 'brief-campana', cat: 'marketing', icon: '🎯', name: 'Brief de campaña publicitaria',
+    desc: 'NIT cliente/agencia, emails, teléfonos, presupuesto, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `BRIEF CREATIVO — CAMPAÑA "COLOMBIA SEGURA"
+Cliente: Seguros Confianza S.A. — NIT: 890.234.567-8
+
+CONTACTO CLIENTE:
+Catalina Andrea Puentes Londoño — Gerente de Marca
+c.puentes@segurosconfianza.com.co — +57 601 456 7890 ext. 234
+
+AGENCIA: Creativa Latina S.A.S. — NIT: 900.789.234-5
+Sergio Nicolás Estrada Ríos — Director de Cuenta
+s.estrada@creativalatina.co — +57 318 456 7890
+
+OBJETIVO: +15% en cotizaciones online "Nido Seguro" (de 2.340 a 2.691/mes) en Bogotá, Medellín y Cali.
+
+PRESUPUESTO Q3: $280.000.000
+- Digital (Meta/Google): $120.000.000
+- TV/Radio: $95.000.000
+- OOH: $45.000.000
+Cuenta facturar: Banco Occidente cta. cte. 234-890123-45` },
+
+  { id: 'informe-campana', cat: 'marketing', icon: '📈', name: 'Informe de resultados de campaña',
+    desc: 'NIT cliente/agencia, emails, teléfonos, inversión, métricas',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `INFORME DE RESULTADOS — CAMPAÑA DIGITAL "VERANO TECH 2024"
+Mayo 2024
+
+Cliente: Tiendas Electrónicas del Norte S.A.S. — NIT: 900.567.234-1
+Marcela Johanna López — m.lopez@techtiendas.com — +57 314 789 0123
+
+Agencia: Performance Lab Colombia S.A.S.
+Juan Nicolás Quiroga — j.quiroga@perflab.co
+
+RESULTADOS:
+- Inversión: $45.000.000
+- Impresiones: 12.450.000
+- Clics: 234.500 — CTR: 1.88%
+- Conversiones: 4.567 — CPA: $9.852
+- Revenue: $234.000.000 — ROAS: 5.2x
+
+Producto estrella: Laptop Lenovo — 1.234 unidades vendidas.
+Comisión agencia: BBVA cta. 789-012345-67` },
+
+  { id: 'base-clientes', cat: 'marketing', icon: '👥', name: 'Base de datos de clientes (fragmento CRM)',
+    desc: 'Emails, teléfonos, CC/NIT, ciudades, montos de compra',
+    cats: ['email','phone','fiscal','money','address','company'],
+    text: `LISTADO CLIENTES PREMIUM — EXPORTACIÓN CRM — CONFIDENCIAL
+Fecha: 1 de junio de 2024
+
+ID | Nombre | Email | Teléfono | NIT/CC | Última compra | Total
+001 | Andrés Felipe Torres Ramírez | a.torres@empresa.com | +57 301 234 5678 | 79.456.123 | 2024-05-15 | $4.500.000
+002 | María Camila Rodríguez Hurtado | maria.rodriguez@hotmail.com | +57 312 345 6789 | 43.567.890 | 2024-05-22 | $2.890.000
+003 | Distribuidora Pacífico S.A.S. | compras@distpacifico.co | +57 2 345 6789 | 900.234.567-8 | 2024-04-30 | $18.700.000
+004 | Jorge Luis Pedraza Mora | jl.pedraza@gmail.com | +57 315 456 7890 | 91.789.012 | 2024-05-10 | $3.200.000
+005 | IMPORTEX S.A. | gerencia@importex.com.co | +57 1 890 1234 | 860.345.678-9 | 2024-05-28 | $45.000.000
+006 | Lucía Esperanza Vargas | lucia.vargas.v@yahoo.com | +57 317 567 8901 | 60.234.567 | 2024-03-15 | $1.750.000` },
+
+  { id: 'encuesta-satisfaccion', cat: 'marketing', icon: '⭐', name: 'Resultados de encuesta NPS',
+    desc: 'Emails clientes, teléfonos, nombres, comentarios con datos personales',
+    cats: ['email','phone','fiscal','company'],
+    text: `RESULTADOS ENCUESTA NPS — Q1 2024
+Servicios Corporativos Premium S.A.S. — NIT: 900.123.789-4
+Daniela Fernanda Castillo — d.castillo@servicioscorp.co — +57 312 678 9012
+
+NPS Global: 47 | Promotores 62% | Neutros 23% | Detractores 15%
+Encuestas: 347/512 (67.8%)
+
+COMENTARIOS PROMOTORES:
+"Excelente servicio de Juliana Ríos (j.rios@servicioscorp.co)" — Mario Suárez Vargas (mario.suarez@clienteA.com, +57 311 789 0123)
+"Pedro Gutiérrez fue muy profesional" — Empresa ABC (NIT 900.456.789)
+
+COMENTARIO CRÍTICO:
+"3 semanas sin resolver mi caso #CS-2024-04567"
+Contacto: Diana López — diana.lopez.b@gmail.com — +57 316 890 1234
+
+Próxima encuesta: septiembre 2024.` },
+
+  { id: 'contrato-influencer', cat: 'marketing', icon: '📱', name: 'Contrato con influencer / creador',
+    desc: 'CC, NIT marca, emails, teléfono, cuenta de pago, honorarios',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `CONTRATO DE COLABORACIÓN — CREADOR DE CONTENIDO No. CC-2024-0123
+
+MARCA: Cosméticos Naturales Aurora S.A.S. — NIT: 900.456.123-7
+Valentina Ríos Montoya — v.rios@cosmeticosaurora.co — +57 604 456 7890
+
+CREADOR: Isabela Sánchez Restrepo (@isabelaskincare)
+Instagram: 234.000 seguidores — TikTok: 189.000 seguidores
+C.C.: 1.037.890.123 — Medellín
+isabela.skincare.pr@gmail.com — +57 313 012 3456
+Cuenta Nequi: 313 012 3456 / Bancolombia ahorros 234-890123-45
+
+ALCANCE: 6 publicaciones Instagram + 4 TikToks — Línea Vitamina C
+
+HONORARIOS: $3.500.000/mes × 3 meses = $10.500.000 total
+Inicio: 1 de julio de 2024
+Exclusividad: sector cosméticos, 6 meses.` },
+
+  { id: 'plan-medios', cat: 'marketing', icon: '📺', name: 'Plan de medios publicitario',
+    desc: 'NIT cliente/agencia, emails, teléfonos, inversión por canal, cuenta',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `PLAN DE MEDIOS — SEGUNDO SEMESTRE 2024
+Cliente: Banco Regional del Pacífico S.A. — NIT: 890.901.234-5
+Hernando Alfredo Aguilar Cerón — h.aguilar@bancopacificosa.com — +57 2 789 0123
+
+Agencia: Media Solutions Colombia S.A.S.
+Natalia Andrea Duque — n.duque@mediasolutions.co — +57 318 012 3456
+
+INVERSIÓN TOTAL: $1.450.000.000
+- TV (RCN, Caracol): $580.000.000 — CPM $12.400
+- Digital (Google, Meta, Spotify): $435.000.000 — CPC $890
+- Radio (La W, Blu, RCN): $217.500.000
+- OOH Bogotá/Medellín/Cali: $145.000.000
+- Prensa (El Tiempo, El Colombiano): $72.500.000
+
+KPI: 45% cobertura adultos 25-55
+Cuenta facturación: Davivienda 456-789012-34` },
+
+  { id: 'propuesta-agencia', cat: 'marketing', icon: '🏢', name: 'Propuesta de servicios de agencia',
+    desc: 'NIT agencia/cliente, emails, teléfonos, retainer mensual, cuenta bancaria',
+    cats: ['email','phone','fiscal','financial','money','company'],
+    text: `PROPUESTA DE SERVICIOS INTEGRALES — Ref.: PROP-AGEN-2024-0067
+
+360 Comunicaciones Estratégicas Ltda. — NIT: 800.345.678-9
+CEO: Juliana Marcela Pinto — j.pinto@360com.co — +57 601 234 5678
+Director Creativo: Andrés Esteban Varela — a.varela@360com.co — +57 311 456 7890
+
+Para: Grupo Empresarial Santander S.A. — NIT: 860.456.789-3
+CMO: Rosa Helena Mantilla — r.mantilla@gesantander.com
+
+SERVICIOS (12 meses):
+1. Dirección estratégica de marca: $3.500.000/mes
+2. Community management (6 redes): $2.800.000/mes
+3. Producción contenidos (16 piezas/mes): $4.200.000/mes
+4. Relaciones públicas y prensa: $2.500.000/mes
+RETAINER MENSUAL: $13.000.000 + IVA
+
+Cuenta agencia: Banco Popular cta. cte. 789-123456-78` },
+];
+
+// ─── Panel de plantillas ───────────────────────────────────────────────────────
+function TemplatesPanel({ onSelect, onClose }) {
+  const [search, setSearch] = React.useState('');
+  const [activeCat, setActiveCat] = React.useState('all');
+
+  const filtered = TEMPLATES.filter(t => {
+    const matchCat = activeCat === 'all' || t.cat === activeCat;
+    const q = search.toLowerCase();
+    const matchSearch = !q || t.name.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q);
+    return matchCat && matchSearch;
+  });
+
+  const catDef = TEMPLATE_CATS.find(c => c.id === activeCat);
+
+  return (
+    <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 border-b border-[#e5e5e5] bg-[#fff5f6] px-6 py-4">
+        <div>
+          <h3 className="font-bold text-[#222222]">📋 Plantillas de ejemplo</h3>
+          <p className="text-xs text-[#757575] mt-0.5">{TEMPLATES.length} documentos reales · Haz clic en cualquiera para cargarlo</p>
+        </div>
+        <button onClick={onClose} className="rounded-xl border border-[#e5e5e5] bg-white px-3 py-1.5 text-xs font-semibold text-[#757575] hover:bg-[#fafafa]">
+          × Cerrar
+        </button>
+      </div>
+
+      {/* Search + category filter */}
+      <div className="border-b border-[#e5e5e5] px-6 py-3 space-y-3">
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar plantilla…"
+          className="w-full rounded-2xl border border-[#e5e5e5] px-4 py-2 text-sm text-[#222222] outline-none focus:border-[#b00020] transition"
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {TEMPLATE_CATS.map(c => (
+            <button key={c.id} onClick={() => setActiveCat(c.id)}
+              className={cn('rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                activeCat === c.id
+                  ? 'bg-[#b00020] text-white'
+                  : 'border border-[#e5e5e5] bg-white text-[#333333] hover:bg-[#fff5f6]')}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div className="max-h-96 overflow-y-auto p-4">
+        {filtered.length === 0 ? (
+          <div className="py-8 text-center text-sm text-[#757575]">No se encontraron plantillas para "{search}"</div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map(t => (
+              <button key={t.id} onClick={() => onSelect(t)}
+                className="rounded-2xl border border-[#e5e5e5] bg-white p-4 text-left hover:border-[#b00020] hover:bg-[#fff5f6] transition group">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xl">{t.icon}</span>
+                  <span className="font-semibold text-sm text-[#222222] group-hover:text-[#b00020] transition">{t.name}</span>
+                </div>
+                <p className="text-xs text-[#757575] leading-relaxed">{t.desc}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Pestaña Anonimizar ───────────────────────────────────────────────────────
+function AnonTab({ setLastResult }) {
+  const [inputText, setInputText] = useState('');
+  const [result, setResult] = useState(null);
+  const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
+  const [customTerms, setCustomTerms] = useState('');
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copiedTable, setCopiedTable] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [showTemplates, setShowTemplates] = useState(false);
+  const outputRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const loadTemplate = (template) => {
+    if (inputText && !window.confirm('¿Reemplazar el texto actual con la plantilla "' + template.name + '"?')) return;
+    setInputText(template.text);
+    setResult(null);
+    setShowTemplates(false);
+    // Auto-activate relevant categories
+    setCats(prev => prev.map(c => {
+      if (c.alwaysOn) return c;
+      const shouldActivate = template.cats.includes(c.id);
+      return Object.assign({}, c, { on: shouldActivate });
+    }));
+  };
+
+  const activeCats = cats.filter(c => c.on);
+  const allCats = [...cats, CUSTOM_CAT];
+  const hasCustomTerms = customTerms.trim().split('\n').some(t => t.trim().length >= 2);
+
+  const loadSample = () => {
+    if (inputText && !window.confirm('¿Reemplazar el texto actual con el ejemplo?')) return;
+    setInputText(SAMPLE_TEXT);
+    setResult(null);
+  };
+
+  const clear = () => {
+    if (!window.confirm('¿Borrar el texto y el resultado? Esta acción no se puede deshacer.')) return;
+    setInputText('');
+    setResult(null);
+  };
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg('Procesando archivo…');
+    try {
+      const text = await extractTextFromFile(file, msg => setUploadMsg(msg));
+      if (!text.trim()) throw new Error('No se pudo extraer texto del archivo. ¿Está protegido con contraseña o es un PDF escaneado (solo imágenes)?');
+      setInputText(text);
+      setResult(null);
+      setUploadMsg('');
+    } catch (err) {
+      setUploadMsg('');
+      alert('Error al leer el archivo:\n' + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const anonymize = () => {
+    if (!inputText.trim()) return;
+    if (activeCats.length === 0 && !hasCustomTerms) {
+      alert('Activa al menos una categoría o añade términos personalizados antes de anonimizar.');
+      return;
+    }
+    const r = runAnonymize(inputText, activeCats, customTerms);
+    setResult(r);
+    if (setLastResult) setLastResult(r);
+    setTimeout(() => outputRef.current && outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  };
+
+  const toggleCat = (id) => {
+    const cat = CATS.find(c => c.id === id);
+    if (cat && cat.alwaysOn) return;
+    setCats(prev => prev.map(c => c.id === id ? Object.assign({}, c, { on: !c.on }) : c));
+    setResult(null);
+  };
+
+  const copyOutput = () => {
+    if (!result) return;
+    navigator.clipboard.writeText(result.out).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  const copyTable = () => {
+    if (!result || !result.reps.length) return;
+    const lines = result.reps.map(r => r.replacement + '\t' + r.original + (r.hint ? '\t(' + r.hint + ')' : '') + '\t' + r.catLabel);
+    navigator.clipboard.writeText(['Etiqueta\tOriginal\tHint\tCategoría'].concat(lines).join('\n')).then(() => {
+      setCopiedTable(true); setTimeout(() => setCopiedTable(false), 2000);
+    });
+  };
+
+  const downloadDocs = () => {
+    if (!result) return;
+    const { score } = computeResidualRisk(result.out);
+    const riskInfo = getRiskInfo(score);
+    const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
+    downloadCombinedDoc({
+      anonText: result.out,
+      reps: result.reps,
+      cats: allCats,
+      activeCats: effectiveActiveCats,
+      riskScore: score,
+      riskLabel: riskInfo.label,
+      timestamp: new Date().toLocaleString('es'),
+      originalLen: inputText.length,
+    });
+  };
+
+  const riskData = result ? computeResidualRisk(result.out) : null;
+  const canExport = result && riskData && riskData.score < 60;
+  const totalDetected = result ? result.reps.length : 0;
+  const byCategory = result
+    ? allCats.map(c => Object.assign({}, c, { count: result.reps.filter(r => r.catId === c.id).length })).filter(c => c.count > 0)
+    : [];
+
+  return (
+    <div className="space-y-6">
+      {/* Panel de plantillas */}
+      {showTemplates ? (
+        <TemplatesPanel onSelect={loadTemplate} onClose={() => setShowTemplates(false)} />
+      ) : null}
+
+      {/* Categorías */}
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <h3 className="font-bold text-[#222222]">Categorías de detección</h3>
+          <InfoIcon text="Las categorías en rojo siempre están activas. Las demás se activan o desactivan. Las marcadas con (heurístico) tienen mayor riesgo de falsos positivos." />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {cats.map(c => (
+            <button
+              key={c.id}
+              onClick={() => toggleCat(c.id)}
+              aria-pressed={c.on}
+              disabled={c.alwaysOn}
+              className={cn(
+                "flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm font-semibold transition text-left",
+                c.alwaysOn
+                  ? "border-[#fecaca] bg-[#fef2f2] text-[#dc2626] cursor-default"
+                  : c.on
+                    ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]"
+                    : "border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]"
+              )}
+            >
+              {c.alwaysOn
+                ? <span className="text-xs">🔒</span>
+                : <span className={cn("h-2 w-2 shrink-0 rounded-full", c.on ? "bg-[#b00020]" : "bg-[#e5e5e5]")} />
+              }
+              <span className="truncate">{c.label}</span>
+            </button>
+          ))}
+        </div>
+        {/* Términos personalizados */}
+        <div className="mt-5 pt-5 border-t border-[#e5e5e5]">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-sm font-semibold text-[#222222]">Términos personalizados</span>
+            <InfoIcon text="Escribe aquí nombres propios, siglas internas, códigos de proyecto, o cualquier término que quieras anonimizar y que no cubre ninguna categoría. Un término por línea. Se detectan sin distinción de mayúsculas y se reemplazan por [PERSONALIZADO_N]." />
+          </div>
+          <textarea
+            className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-3 font-mono text-sm text-[#222222] outline-none transition resize-y"
+            onFocus={e => e.target.style.borderColor = '#b00020'}
+            onBlur={e => e.target.style.borderColor = '#e5e5e5'}
+            rows={3}
+            value={customTerms}
+            onChange={e => { setCustomTerms(e.target.value); setResult(null); }}
+            placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ\n(un término por línea)"}
+            aria-label="Términos personalizados para anonimizar"
+          />
+          <p className="mt-1.5 text-xs text-[#757575]">Un término por línea · Detección sin distinción de mayúsculas · Mínimo 2 caracteres por término</p>
+        </div>
+      </div>
+
+      {/* Entrada */}
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+        <div className="mb-3 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <h3 className="font-bold text-[#222222]">Texto a anonimizar</h3>
+            <InfoIcon text="Pega aquí emails, contratos, informes o cualquier documento. O sube un archivo .txt / .csv." />
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <AppButton variant="secondary" disabled={uploading} onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+              {uploading ? '⏳ Procesando…' : '↑ PDF / DOCX / TXT / CSV'}
+            </AppButton>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.csv,.pdf,.doc,.docx"
+              className="hidden"
+              onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ''; }}
+            />
+            <AppButton variant="secondary" onClick={() => setShowTemplates(v => !v)} disabled={uploading}>
+              {showTemplates ? '× Cerrar plantillas' : '📋 Ver plantillas'}
+            </AppButton>
+            {inputText ? <AppButton variant="secondary" onClick={clear} disabled={uploading}>Limpiar</AppButton> : null}
+          </div>
+        </div>
+        <textarea
+          className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-4 font-mono text-sm text-[#222222] outline-none transition resize-y"
+          style={{ focusBorderColor: '#b00020' }}
+          onFocus={e => e.target.style.borderColor = '#b00020'}
+          onBlur={e => e.target.style.borderColor = '#e5e5e5'}
+          rows={12}
+          value={inputText}
+          onChange={e => { setInputText(e.target.value); setResult(null); }}
+          placeholder="Pega aquí el texto que deseas anonimizar antes de enviarlo a un modelo de IA…"
+          aria-label="Texto de entrada para anonimizar"
+        />
+        {uploading && uploadMsg ? (
+          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1d4ed8]">
+            <span className="animate-spin text-lg">⏳</span>
+            <span>{uploadMsg}</span>
+          </div>
+        ) : null}
+        <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-xs text-[#757575]">{inputText.length.toLocaleString()} caracteres · {activeCats.length} categorías activas</span>
+          <AppButton onClick={anonymize} disabled={!inputText.trim() || activeCats.length === 0 || uploading}>
+            🔒 Anonimizar
+          </AppButton>
+        </div>
+      </div>
+
+      {/* Resultado */}
+      {result ? (
+        <div ref={outputRef} className="space-y-4">
+          {/* Semáforo */}
+          <RiskSemaphore text={result.out} activeCatIds={activeCats.map(c => c.id)} />
+
+          {/* Bloqueo si riesgo alto */}
+          {riskData && riskData.score >= 60 ? (
+            <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] p-4 text-sm text-[#dc2626] font-semibold">
+              🔴 Exportación deshabilitada — riesgo residual demasiado alto ({riskData.score}%). Activa las categorías marcadas por el semáforo y vuelve a anonimizar.
+            </div>
+          ) : null}
+
+          {/* Resumen */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              { val: totalDetected, label: 'datos detectados', highlight: true },
+              { val: byCategory.length, label: 'categorías con coincidencias' },
+              { val: result.out.length.toLocaleString(), label: 'caracteres en resultado' },
+            ].map((item, i) => (
+              <div key={i} className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-4 text-center">
+                <div className={cn("text-3xl font-bold", item.highlight ? "text-[#b00020]" : "text-[#222222]")}>{item.val}</div>
+                <div className="text-xs text-[#757575] mt-1">{item.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Badges por categoría */}
+          {byCategory.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {byCategory.map(c => (
+                <span key={c.id} className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold"
+                  style={{ backgroundColor: c.bg, color: c.color, borderColor: c.border }}>
+                  {c.label}: {c.count}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Texto anonimizado */}
+          <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+            <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <h3 className="font-bold text-[#222222]">Texto anonimizado</h3>
+                <button
+                  onClick={() => setShowOriginal(v => !v)}
+                  className={cn("rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
+                    showOriginal ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]")}
+                >
+                  {showOriginal ? '▼ Ocultar original' : '▶ Ver comparativa'}
+                </button>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <AppButton variant="secondary" onClick={copyOutput} disabled={!canExport}>
+                  {copied ? '✓ Copiado' : '📋 Copiar texto'}
+                </AppButton>
+                <AppButton onClick={downloadDocs} disabled={!canExport}>
+                  ↓ Descargar .doc
+                </AppButton>
+              </div>
+            </div>
+
+            {/* Vista comparativa */}
+            {showOriginal ? (
+              <div className="grid gap-4 md:grid-cols-2 mb-4">
+                <div>
+                  <div className="mb-2 text-xs font-semibold text-[#757575]">ORIGINAL</div>
+                  <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-[#757575]">{inputText}</pre>
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-2 text-xs font-semibold text-[#b00020]">ANONIMIZADO</div>
+                  <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto">
+                    <HighlightedOutput text={result.out} reps={result.reps} cats={allCats} />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto">
+                <HighlightedOutput text={result.out} reps={result.reps} cats={allCats} />
+              </div>
+            )}
+
+            <p className="mt-2 text-xs text-[#757575]">
+              Pasa el cursor sobre las etiquetas para ver el valor original.
+              {riskData && riskData.score >= 60 ? ' La exportación está deshabilitada por alto riesgo residual.' : ''}
+            </p>
+          </div>
+
+          {/* Tabla de equivalencias */}
+          {result.reps.length > 0 ? (
+            <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+              <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-[#222222]">Tabla de equivalencias</h3>
+                  <InfoIcon text="Esta tabla mapea [ETIQUETA] → dato original. Se incluye automáticamente en el segundo .doc al descargar. Al cerrar la pestaña, desaparece." />
+                </div>
+                <div className="flex gap-2">
+                  <AppButton variant="secondary" onClick={copyTable}>
+                    {copiedTable ? '✓ Copiada' : '📋 Copiar'}
+                  </AppButton>
+                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport}>
+                    ↓ Descargar .doc
+                  </AppButton>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[#e5e5e5]">
+                      <th className="py-2 pr-4 text-left font-semibold text-[#222222]">Etiqueta</th>
+                      <th className="py-2 pr-4 text-left font-semibold text-[#222222]">Dato original</th>
+                      <th className="py-2 pr-4 text-left font-semibold text-[#222222]">Rango / Hint</th>
+                      <th className="py-2 text-left font-semibold text-[#222222]">Categoría</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.reps.map((r, i) => {
+                      const cat = allCats.find(c => c.id === r.catId);
+                      return (
+                        <tr key={i} className="border-b border-[#e5e5e5] last:border-0">
+                          <td className="py-2 pr-4">
+                            <mark className="anon font-mono text-xs px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: cat ? cat.bg : '#f5f5f5', color: cat ? cat.color : '#333', border: '1px solid ' + (cat ? cat.border : '#e5e5e5') }}>
+                              {r.replacement}
+                            </mark>
+                          </td>
+                          <td className="py-2 pr-4 font-mono text-xs text-[#333333] break-all">{r.original}</td>
+                          <td className="py-2 pr-4 text-xs text-[#757575]">{r.hint || '—'}</td>
+                          <td className="py-2 text-xs text-[#757575]">{r.catLabel}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Estado vacío */}
+      {!result && !inputText ? (
+        <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-10 text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <p className="text-lg font-semibold text-[#222222] mb-1">Tu texto anonimizado aparecerá aquí</p>
+          <p className="text-sm text-[#757575] mb-4">Pega texto directamente o elige una plantilla de 50 tipos de documentos reales.</p>
+          <AppButton variant="secondary" onClick={() => setShowTemplates(true)}>📋 Ver plantillas de ejemplo</AppButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Pestaña Documento ────────────────────────────────────────────────────────
+function DocumentTab() {
+  const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
+  const [customTerms, setCustomTerms] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerData, setViewerData] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const activeCats = cats.filter(c => c.on);
+  const allCats = [...cats, CUSTOM_CAT];
+  const hasCustomTerms = customTerms.trim().split('\n').some(t => t.trim().length >= 2);
+
+  const toggleCat = (id) => {
+    const cat = CATS.find(c => c.id === id);
+    if (cat && cat.alwaysOn) return;
+    setCats(prev => prev.map(c => c.id === id ? Object.assign({}, c, { on: !c.on }) : c));
+  };
+
+  const processFile = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg('Procesando archivo…');
+    setUploadedFile(null);
+    try {
+      const text = await extractTextFromFile(file, msg => setUploadMsg(msg));
+      if (!text.trim()) throw new Error('No se pudo extraer texto. ¿Es un PDF escaneado o está protegido con contraseña?');
+      setUploadedFile({ name: file.name, text });
+      setUploadMsg('');
+    } catch (err) {
+      setUploadMsg('');
+      alert('Error al leer el archivo:\n' + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) processFile(file);
+  };
+
+  const anonymizeAndOpen = () => {
+    if (!uploadedFile) return;
+    if (activeCats.length === 0 && !hasCustomTerms) return;
+    const r = runAnonymize(uploadedFile.text, activeCats, customTerms);
+    const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
+    setViewerData({
+      anonText: r.out,
+      reps: r.reps,
+      cats: allCats,
+      activeCats: effectiveActiveCats,
+      fileName: uploadedFile.name,
+      originalLen: uploadedFile.text.length,
+    });
+    setViewerOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Zona de carga */}
+      <div
+        className={cn(
+          'rounded-[28px] border-2 border-dashed transition-all cursor-pointer select-none',
+          dragOver ? 'border-[#b00020] bg-[#fff5f6]' : 'border-[#e5e5e5] bg-white hover:border-[#b00020]/40 hover:bg-[#fff5f6]/50'
+        )}
+        onClick={() => !uploading && fileInputRef.current && fileInputRef.current.click()}
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        role="button"
+        aria-label="Zona de carga de documentos"
+      >
+        <div className="flex flex-col items-center justify-center gap-3 py-12">
+          <span className="text-5xl">{uploading ? '⏳' : uploadedFile ? '📄' : '📂'}</span>
+          {uploading ? (
+            <div className="text-center">
+              <p className="font-semibold text-[#222222]">Procesando documento…</p>
+              <p className="mt-1 text-sm text-[#757575]">{uploadMsg}</p>
+            </div>
+          ) : uploadedFile ? (
+            <div className="text-center">
+              <p className="font-semibold text-[#222222]">{uploadedFile.name}</p>
+              <p className="mt-1 text-sm text-[#757575]">{uploadedFile.text.length.toLocaleString()} caracteres extraídos · Haz clic para cambiar el archivo</p>
+            </div>
+          ) : (
+            <div className="text-center">
+              <p className="font-semibold text-[#222222]">Arrastra tu documento aquí o haz clic para seleccionarlo</p>
+              <p className="mt-1 text-sm text-[#757575]">PDF, DOCX, DOC, TXT, CSV · Procesamiento 100% local</p>
+            </div>
+          )}
+        </div>
+      </div>
+      <input ref={fileInputRef} type="file" accept=".txt,.csv,.pdf,.doc,.docx" className="hidden"
+        onChange={e => { processFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+
+      {/* Categorías */}
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <h3 className="font-bold text-[#222222]">Categorías de detección</h3>
+          <InfoIcon text="Las credenciales siempre están activas. Activa las demás según tu caso de uso." />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {cats.map(c => (
+            <button key={c.id} onClick={() => toggleCat(c.id)} aria-pressed={c.on} disabled={c.alwaysOn}
+              className={cn('flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm font-semibold transition text-left',
+                c.alwaysOn ? 'border-[#fecaca] bg-[#fef2f2] text-[#dc2626] cursor-default'
+                  : c.on ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]'
+                  : 'border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]')}>
+              {c.alwaysOn ? <span className="text-xs">🔒</span> : <span className={cn('h-2 w-2 shrink-0 rounded-full', c.on ? 'bg-[#b00020]' : 'bg-[#e5e5e5]')} />}
+              <span className="truncate">{c.label}</span>
+            </button>
+          ))}
+        </div>
+        {/* Términos personalizados */}
+        <div className="mt-5 pt-5 border-t border-[#e5e5e5]">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-sm font-semibold text-[#222222]">Términos personalizados</span>
+            <InfoIcon text="Escribe aquí nombres propios, siglas internas, códigos de proyecto, o cualquier término que quieras anonimizar y que no cubre ninguna categoría. Un término por línea. Se detectan sin distinción de mayúsculas y se reemplazan por [PERSONALIZADO_N]." />
+          </div>
+          <textarea
+            className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-3 font-mono text-sm text-[#222222] outline-none transition resize-y"
+            onFocus={e => e.target.style.borderColor = '#b00020'}
+            onBlur={e => e.target.style.borderColor = '#e5e5e5'}
+            rows={3}
+            value={customTerms}
+            onChange={e => setCustomTerms(e.target.value)}
+            placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ\n(un término por línea)"}
+            aria-label="Términos personalizados para anonimizar"
+          />
+          <p className="mt-1.5 text-xs text-[#757575]">Un término por línea · Detección sin distinción de mayúsculas · Mínimo 2 caracteres por término</p>
+        </div>
+      </div>
+
+      {/* Botón anonimizar */}
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm text-[#757575]">El documento anonimizado se mostrará en un visor antes de descargar o imprimir.</p>
+        <AppButton onClick={anonymizeAndOpen} disabled={!uploadedFile || (activeCats.length === 0 && !hasCustomTerms) || uploading}>
+          🔒 Anonimizar y ver
+        </AppButton>
+      </div>
+
+      {/* Visor */}
+      {viewerOpen && viewerData ? (
+        <DocumentViewer
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          anonText={viewerData.anonText}
+          reps={viewerData.reps}
+          cats={viewerData.cats}
+          activeCats={viewerData.activeCats}
+          fileName={viewerData.fileName}
+          originalLen={viewerData.originalLen}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Pestaña Recuperar ────────────────────────────────────────────────────────
+function RecoverTab({ lastResult }) {
+  const [mode, setMode] = useState(lastResult ? 'auto' : 'paste');
+  const [mappingText, setMappingText] = useState('');
+  const [modifiedText, setModifiedText] = useState('');
+  const [recovered, setRecovered] = useState(null);
+  const [copiedRecover, setCopiedRecover] = useState(false);
+
+  const buildMapping = () => {
+    if (mode === 'auto' && lastResult && lastResult.reps) {
+      const map = {};
+      for (const r of lastResult.reps) map[r.replacement] = r.original;
+      return map;
+    } else if (mode === 'paste' && mappingText.trim()) {
+      const map = {};
+      const lines = mappingText.trim().split('\n');
+      for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+          const tag = parts[0].trim();
+          const original = parts[1].trim();
+          if (/^\[[A-Z_]+_\d+\]$/.test(tag)) map[tag] = original;
+        }
+      }
+      return map;
+    }
+    return {};
+  };
+
+  const recover = () => {
+    if (!modifiedText.trim()) { alert('Pega el texto modificado por el LLM.'); return; }
+    const mapping = buildMapping();
+    if (!Object.keys(mapping).length) {
+      alert('No hay mapeo disponible. Cambia a "Pegar tabla" y pega la tabla de equivalencias.');
+      return;
+    }
+    const tagPattern = /\[[A-Z_]+_\d+\]/g;
+    const found = [...new Set(modifiedText.match(tagPattern) || [])];
+    const resolved = [];
+    const unresolved = [];
+    let out = modifiedText;
+    for (const tag of found) {
+      if (mapping[tag] !== undefined) {
+        out = out.split(tag).join(mapping[tag]);
+        resolved.push({ tag, value: mapping[tag] });
+      } else {
+        unresolved.push(tag);
+      }
+    }
+    setRecovered({ out, resolved, unresolved });
+  };
+
+  const copyRecovered = () => {
+    if (!recovered) return;
+    navigator.clipboard.writeText(recovered.out).then(() => {
+      setCopiedRecover(true);
+      setTimeout(() => setCopiedRecover(false), 2000);
+    });
+  };
+
+  const hasMappingSource = (mode === 'auto' && lastResult) || (mode === 'paste' && mappingText.trim());
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+        <h2 className="text-xl font-bold text-[#222222] mb-1">Recuperar texto original</h2>
+        <p className="text-sm text-[#757575]">
+          Devuelve el texto a su forma original después de que el LLM lo procesó, reemplazando cada etiqueta <span className="font-mono">[TAG_N]</span> por el dato real correspondiente.
+        </p>
+      </div>
+
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#757575] mb-3">Fuente del mapeo</p>
+        <div className="mb-4 flex gap-3">
+          <button
+            onClick={() => { setMode('auto'); setRecovered(null); }}
+            className={cn("flex-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left",
+              mode === 'auto'
+                ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]"
+                : "border-[#e5e5e5] text-[#333333] hover:bg-[#fafafa]"
+            )}
+          >
+            <div className="font-bold mb-0.5">⚡ Sesión actual</div>
+            <div className={cn("text-xs font-normal", mode === 'auto' ? 'text-[#b00020]' : 'text-[#757575]')}>
+              {lastResult
+                ? lastResult.reps.length + ' etiquetas disponibles de la última anonimización'
+                : 'Anonimiza primero en la pestaña Texto'}
+            </div>
+          </button>
+          <button
+            onClick={() => { setMode('paste'); setRecovered(null); }}
+            className={cn("flex-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left",
+              mode === 'paste'
+                ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]"
+                : "border-[#e5e5e5] text-[#333333] hover:bg-[#fafafa]"
+            )}
+          >
+            <div className="font-bold mb-0.5">📋 Pegar tabla</div>
+            <div className={cn("text-xs font-normal", mode === 'paste' ? 'text-[#b00020]' : 'text-[#757575]')}>
+              Sesiones distintas: copia la tabla del .doc descargado y pégala aquí
+            </div>
+          </button>
+        </div>
+
+        {mode === 'paste' && (
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-sm font-semibold text-[#222222]">Tabla de equivalencias</span>
+              <InfoIcon text="En Word: selecciona toda la tabla de equivalencias → Copiar → pega aquí. También funciona con el botón '📋 Copiar' de la tabla en la pestaña Texto." />
+            </div>
+            <textarea
+              rows={5}
+              value={mappingText}
+              onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
+              className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 font-mono text-xs text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
+              placeholder={"Etiqueta\tDato original\tRango / Hint\tCategoría\n[EMAIL_1]\tmaria@empresa.com\t—\tCorreos electrónicos\n[TELEFONO_1]\t+52 55 4321 0987\t—\tTeléfonos"}
+            />
+            <p className="mt-1.5 text-xs text-[#757575]">
+              En Word: selecciona la tabla → Copiar → pega aquí · O usa "📋 Copiar" de la tabla en la pestaña Texto
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-sm font-semibold text-[#222222]">Texto modificado por el LLM</span>
+          <InfoIcon text="Pega aquí el texto que te devolvió ChatGPT, Claude u otro modelo. Las etiquetas [TAG_N] serán reemplazadas por los datos originales." />
+        </div>
+        <textarea
+          rows={8}
+          value={modifiedText}
+          onChange={e => { setModifiedText(e.target.value); setRecovered(null); }}
+          className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 text-sm text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
+          placeholder="Pega aquí el texto que te devolvió el LLM. Las etiquetas [EMAIL_1], [TELEFONO_1], etc. serán reemplazadas por los datos originales."
+        />
+        <div className="mt-3">
+          <AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>
+            🔄 Recuperar texto original
+          </AppButton>
+        </div>
+      </div>
+
+      {recovered ? (
+        <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6 space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            {recovered.resolved.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-1.5 text-sm font-semibold text-[#16a34a]">
+                ✓ {recovered.resolved.length} etiqueta{recovered.resolved.length !== 1 ? 's' : ''} restaurada{recovered.resolved.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {recovered.unresolved.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#fffbeb] border border-[#fcd34d] px-3 py-1.5 text-sm font-semibold text-[#d97706]">
+                ⚠ {recovered.unresolved.length} sin resolver
+              </span>
+            )}
+            {recovered.resolved.length === 0 && recovered.unresolved.length === 0 && (
+              <span className="text-sm text-[#757575]">No se encontraron etiquetas [TAG_N] en el texto.</span>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-[#222222]">Texto recuperado</span>
+              <AppButton variant="secondary" onClick={copyRecovered}>
+                {copiedRecover ? '✓ Copiado' : '📋 Copiar'}
+              </AppButton>
+            </div>
+            <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 max-h-96 overflow-y-auto">
+              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[#222222]">{recovered.out}</pre>
+            </div>
+          </div>
+
+          {recovered.unresolved.length > 0 && (
+            <div className="rounded-2xl border border-[#fcd34d] bg-[#fffbeb] p-4 text-sm text-[#92400e]">
+              <strong>Etiquetas sin resolver:</strong> {recovered.unresolved.join(', ')}
+              <span className="block mt-1 text-xs">
+                Estas etiquetas no estaban en la tabla de equivalencias. Puede que correspondan a otra anonimización o que la tabla esté incompleta.
+              </span>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── App principal ────────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'how', label: 'Cómo usar' },
+  { id: 'texto', label: 'Texto' },
+  { id: 'doc', label: 'Documento' },
+  { id: 'recover', label: '🔄 Recuperar' },
+  { id: 'privacy', label: 'Privacidad' },
+];
+
+function App() {
+  const [tab, setTab] = useState('how');
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+
+  return (
+    <div className="min-h-screen bg-white">
+      <header className="sticky top-0 z-40 border-b border-[#e5e5e5] bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#b00020] text-lg font-bold text-white select-none">F</div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-bold tracking-tight text-[#222222]">FuturIA</span>
+                <span className="text-sm font-semibold text-[#757575]">Anonimizador IA</span>
+              </div>
+              <p className="text-xs text-[#757575]">Protege datos sensibles antes de usar modelos de IA — 100% local</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <AppButton variant="secondary" onClick={() => setAboutOpen(true)}>Acerca de</AppButton>
+            <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer">
+              <AppButton>Únete a FuturIA →</AppButton>
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <nav className="sticky top-[72px] z-30 border-b border-[#e5e5e5] bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center gap-1 overflow-x-auto px-5 py-2">
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              aria-current={tab === t.id ? 'page' : undefined}
+              className={cn("shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition",
+                tab === t.id
+                  ? "bg-[#fff5f6] text-[#b00020] border border-[#b00020]"
+                  : "text-[#333333] hover:bg-[#fff5f6]")}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-7xl px-5 py-8">
+        {tab === 'how' ? <HowToTab /> : null}
+        {tab === 'texto' ? <AnonTab setLastResult={setLastResult} /> : null}
+        {tab === 'doc' ? <DocumentTab /> : null}
+        {tab === 'recover' ? <RecoverTab lastResult={lastResult} /> : null}
+        {tab === 'privacy' ? <PrivacyTab /> : null}
+      </main>
+
+      <footer className="border-t border-[#e5e5e5] py-6 text-center text-xs text-[#757575]">
+        FuturIA Anonimizador IA — Procesamiento 100% local. Sin servidores. Sin almacenamiento.
+        {' · '}
+        <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer" className="text-[#b00020] hover:underline">futuria.substack.com</a>
+      </footer>
+
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
