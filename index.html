@@ -417,6 +417,79 @@ function HighlightedOutput({ text, reps, cats }) {
   );
 }
 
+// ─── Límites de carga ─────────────────────────────────────────────────────────
+// Sin límite, un PDF de cientos de páginas congela la pestaña sin explicar nada:
+// el navegador deja de responder y el usuario no sabe si falló o sigue trabajando.
+const MAX_FILE_MB = 25;
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+const MAX_PDF_PAGES = 300;
+const AVISO_PAGINAS = 40;   // a partir de aquí se avisa de que tardará
+
+function formatMB(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
+}
+
+// ─── Reconstrucción del texto de una página de PDF ───────────────────────────
+// pdf.js entrega fragmentos sueltos con su posición en la página. Unirlos todos
+// con espacios (`items.map(i => i.str).join(' ')`) aplasta el documento entero en
+// una sola línea: el visor reparte párrafos por línea en blanco y, sin saltos, un
+// documento de 12 páginas sale como un único bloque ilegible.
+// Aquí se agrupan los fragmentos por coordenada vertical (cada Y distinta es una
+// línea) y se infiere el salto de párrafo cuando el hueco entre líneas supera de
+// forma clara el interlineado normal.
+function reconstructPageText(items) {
+  if (!items || !items.length) return '';
+
+  const lineas = [];
+  let actual = null;
+  for (const item of items) {
+    const str = item.str;
+    if (typeof str !== 'string') continue;
+    // transform = [a, b, c, d, e, f]; f es la coordenada Y del fragmento.
+    const y = item.transform ? item.transform[5] : 0;
+    const alto = item.height || Math.abs(item.transform ? item.transform[3] : 12) || 12;
+
+    if (actual && Math.abs(actual.y - y) <= Math.max(2, alto * 0.5)) {
+      // mismo renglón: pdf.js ya marca con hasEOL dónde termina la línea real
+      actual.partes.push(str);
+    } else {
+      if (actual) lineas.push(actual);
+      actual = { y: y, alto: alto, partes: [str] };
+    }
+    if (item.hasEOL) {
+      lineas.push(actual);
+      actual = null;
+    }
+  }
+  if (actual) lineas.push(actual);
+
+  // Texto de cada línea, sin introducir espacios donde el PDF no los tiene.
+  const textos = lineas.map(l => l.partes.join('').replace(/\s+/g, ' ').trim());
+
+  // Interlineado típico de la página: la mediana de los saltos verticales.
+  const saltos = [];
+  for (let i = 1; i < lineas.length; i++) {
+    const d = Math.abs(lineas[i - 1].y - lineas[i].y);
+    if (d > 0.5) saltos.push(d);
+  }
+  saltos.sort((a, b) => a - b);
+  const interlineado = saltos.length ? saltos[Math.floor(saltos.length / 2)] : 0;
+
+  let out = '';
+  for (let i = 0; i < lineas.length; i++) {
+    const texto = textos[i];
+    if (i === 0) { out = texto; continue; }
+    const salto = Math.abs(lineas[i - 1].y - lineas[i].y);
+    // Hueco claramente mayor que el interlineado = párrafo nuevo.
+    const nuevoParrafo = interlineado > 0 && salto > interlineado * 1.6;
+    if (!texto) { out += '\n'; continue; }
+    out += (nuevoParrafo ? '\n\n' : '\n') + texto;
+  }
+
+  // Normalizar: nunca más de una línea en blanco seguida.
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 // ─── Document Body (párrafos con highlights, para el visor) ──────────────────
 function DocumentBody({ text, reps, cats, showMarks }) {
   const catMap = {};
@@ -428,7 +501,7 @@ function DocumentBody({ text, reps, cats, showMarks }) {
   const renderInline = (para, paraIdx) => {
     const parts = para.split(tagPattern);
     return (
-      <p key={paraIdx} style={{ marginBottom: '1.1em', lineHeight: '1.75', fontSize: '11pt', color: '#222' }}>
+      <p key={paraIdx} style={{ marginBottom: '1.1em', lineHeight: '1.75', fontSize: '11pt', color: '#222', whiteSpace: 'pre-wrap' }}>
         {parts.map((part, i) => {
           const rep = repMap[part];
           if (rep) {
@@ -605,7 +678,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
         }
         return escXml(part);
       }).join('');
-      return '<p style="margin-bottom:1.1em;line-height:1.75">' + inner + '</p>';
+      return '<p style="margin-bottom:1.1em;line-height:1.75;white-space:pre-wrap;mso-line-height-rule:exactly">' + inner + '</p>';
     }).join('');
 
     const dateStr = new Date().toLocaleString('es');
@@ -818,7 +891,7 @@ function PrivacyTab() {
         { icon: '🔒', title: 'Procesamiento 100% local', body: 'Todo ocurre en tu navegador. El texto nunca sale de tu dispositivo. Sin llamadas a servidores, sin APIs externas, sin logging.' },
         { icon: '🗑️', title: 'Sin almacenamiento de ningún tipo', body: 'Sin localStorage, sessionStorage, cookies ni IndexedDB. Al cerrar o recargar la pestaña, todo desaparece. Sin rastros en tu navegador.' },
         { icon: '📡', title: 'Sin telemetría ni analítica', body: 'Sin Google Analytics, Mixpanel, Hotjar ni equivalentes. No se registra qué textos procesas, qué categorías usas ni en qué momentos.' },
-        { icon: '⚠️', title: 'Límites de esta herramienta', body: 'No detecta nombres propios de personas (requiere NLP/IA), no lee PDFs o Word directamente, y no garantiza anonimización completa en textos complejos. Usa siempre el semáforo de riesgo residual y revisa el resultado.' },
+        { icon: '⚠️', title: 'Límites de esta herramienta', body: 'No detecta nombres propios de personas por sí solos (requiere NLP/IA), no lee PDFs escaneados sin capa de texto, y no garantiza anonimización completa en textos complejos. Usa siempre el semáforo de riesgo residual y revisa el resultado.' },
       ].map(item => (
         <div key={item.title} className="rounded-[28px] border border-[#e5e5e5] bg-white p-6 shadow-sm">
           <div className="flex items-start gap-4">
@@ -877,6 +950,16 @@ async function loadMammoth() {
 }
 
 async function extractTextFromFile(file, onProgress) {
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error(
+      'El archivo pesa ' + formatMB(file.size) + ' y el máximo admitido es ' + MAX_FILE_MB + ' MB.\n\n' +
+      'Todo el procesamiento ocurre en tu navegador, así que un archivo muy grande lo dejaría sin responder. ' +
+      'Divide el documento o copia y pega el texto en la pestaña Texto.'
+    );
+  }
+  if (file.size === 0) {
+    throw new Error('El archivo está vacío (0 bytes).');
+  }
   const ext = file.name.toLowerCase().split('.').pop();
 
   if (ext === 'txt' || ext === 'csv') {
@@ -898,13 +981,27 @@ async function extractTextFromFile(file, onProgress) {
       );
     }
     const totalPages = pdf.numPages;
+    if (totalPages > MAX_PDF_PAGES) {
+      throw new Error(
+        'El PDF tiene ' + totalPages + ' páginas y el máximo admitido es ' + MAX_PDF_PAGES + '.\n\n' +
+        'Un documento tan largo bloquearía el navegador durante la extracción. ' +
+        'Divídelo en partes y anonimiza cada una por separado.'
+      );
+    }
     let fullText = '';
+    if (totalPages >= AVISO_PAGINAS) {
+      onProgress('Documento de ' + totalPages + ' páginas — la extracción puede tardar…');
+    }
     for (let i = 1; i <= totalPages; i++) {
       onProgress('Extrayendo página ' + i + ' de ' + totalPages + '…');
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map(item => item.str).join(' ');
-      fullText += pageText + '\n\n';
+      fullText += reconstructPageText(content.items);
+      // Separador de página: línea en blanco, para que el visor abra párrafo nuevo.
+      if (i < totalPages) fullText += '\n\n';
+      // Ceder el hilo cada pocas páginas para que la interfaz siga respondiendo
+      // y el contador de progreso se repinte de verdad en documentos largos.
+      if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
     }
     const trimmed = fullText.trim();
     if (!trimmed) {
@@ -1971,43 +2068,62 @@ function TemplatesPanel({ onSelect, onClose }) {
 
   const catDef = TEMPLATE_CATS.find(c => c.id === activeCat);
 
+  // Cerrar con Escape, como cualquier ventana emergente.
+  React.useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    // Bloquear el scroll del fondo mientras la ventana está abierta.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
   return (
-    <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4 border-b border-[#e5e5e5] bg-[#fff5f6] px-6 py-4">
-        <div>
-          <h3 className="font-bold text-[#222222]">📋 Plantillas de ejemplo</h3>
-          <p className="text-xs text-[#757575] mt-0.5">{TEMPLATES.length} documentos reales · Haz clic en cualquiera para cargarlo</p>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="dialog" aria-modal="true" aria-label="Plantillas de ejemplo"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-[#e5e5e5] bg-white shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-[#e5e5e5] bg-[#fff5f6] px-6 py-4">
+          <div>
+            <h3 className="font-bold text-[#222222]">📋 Plantillas de ejemplo</h3>
+            <p className="text-xs text-[#757575] mt-0.5">{TEMPLATES.length} documentos reales · Haz clic en cualquiera para cargarlo</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-[#e5e5e5] bg-white px-3 py-1.5 text-xs font-semibold text-[#757575] hover:bg-[#fafafa]">
+            × Cerrar
+          </button>
         </div>
-        <button onClick={onClose} className="rounded-xl border border-[#e5e5e5] bg-white px-3 py-1.5 text-xs font-semibold text-[#757575] hover:bg-[#fafafa]">
-          × Cerrar
-        </button>
-      </div>
 
-      {/* Search + category filter */}
-      <div className="border-b border-[#e5e5e5] px-6 py-3 space-y-3">
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar plantilla…"
-          className="w-full rounded-2xl border border-[#e5e5e5] px-4 py-2 text-sm text-[#222222] outline-none focus:border-[#b00020] transition"
-        />
-        <div className="flex flex-wrap gap-1.5">
-          {TEMPLATE_CATS.map(c => (
-            <button key={c.id} onClick={() => setActiveCat(c.id)}
-              className={cn('rounded-xl px-3 py-1.5 text-xs font-semibold transition',
-                activeCat === c.id
-                  ? 'bg-[#b00020] text-white'
-                  : 'border border-[#e5e5e5] bg-white text-[#333333] hover:bg-[#fff5f6]')}>
-              {c.label}
-            </button>
-          ))}
+        {/* Search + category filter */}
+        <div className="shrink-0 border-b border-[#e5e5e5] px-6 py-3 space-y-3">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar plantilla…"
+            autoFocus
+            className="w-full rounded-2xl border border-[#e5e5e5] px-4 py-2 text-sm text-[#222222] outline-none focus:border-[#b00020] transition"
+          />
+          <div className="flex flex-wrap gap-1.5">
+            {TEMPLATE_CATS.map(c => (
+              <button key={c.id} onClick={() => setActiveCat(c.id)}
+                className={cn('rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                  activeCat === c.id
+                    ? 'bg-[#b00020] text-white'
+                    : 'border border-[#e5e5e5] bg-white text-[#333333] hover:bg-[#fff5f6]')}>
+                {c.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Grid */}
-      <div className="max-h-96 overflow-y-auto p-4">
+        {/* Grid: ocupa el alto libre de la ventana y desplaza solo aquí dentro */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {filtered.length === 0 ? (
           <div className="py-8 text-center text-sm text-[#757575]">No se encontraron plantillas para "{search}"</div>
         ) : (
@@ -2024,6 +2140,14 @@ function TemplatesPanel({ onSelect, onClose }) {
             ))}
           </div>
         )}
+        </div>
+
+        {/* Pie: contador de resultados */}
+        <div className="shrink-0 border-t border-[#e5e5e5] bg-[#fafafa] px-6 py-2.5 text-xs text-[#757575]">
+          Mostrando {filtered.length} de {TEMPLATES.length} plantillas
+          {activeCat !== 'all' && catDef ? ' · ' + catDef.label : ''}
+          <span className="float-right hidden sm:inline">Esc para cerrar</span>
+        </div>
       </div>
     </div>
   );
@@ -2194,7 +2318,7 @@ function AnonTab({ setLastResult }) {
             className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-3 font-mono text-sm text-[#222222] outline-none transition resize-y"
             onFocus={e => e.target.style.borderColor = '#b00020'}
             onBlur={e => e.target.style.borderColor = '#e5e5e5'}
-            rows={3}
+            rows={15}
             value={customTerms}
             onChange={e => { setCustomTerms(e.target.value); setResult(null); }}
             placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ\n(un término por línea)"}
@@ -2222,8 +2346,8 @@ function AnonTab({ setLastResult }) {
               className="hidden"
               onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ''; }}
             />
-            <AppButton variant="secondary" onClick={() => setShowTemplates(v => !v)} disabled={uploading}>
-              {showTemplates ? '× Cerrar plantillas' : '📋 Ver plantillas'}
+            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>
+              📋 Ver plantillas
             </AppButton>
             {inputText ? <AppButton variant="secondary" onClick={clear} disabled={uploading}>Limpiar</AppButton> : null}
           </div>
@@ -2233,7 +2357,7 @@ function AnonTab({ setLastResult }) {
           style={{ focusBorderColor: '#b00020' }}
           onFocus={e => e.target.style.borderColor = '#b00020'}
           onBlur={e => e.target.style.borderColor = '#e5e5e5'}
-          rows={12}
+          rows={24}
           value={inputText}
           onChange={e => { setInputText(e.target.value); setResult(null); }}
           placeholder="Pega aquí el texto que deseas anonimizar antes de enviarlo a un modelo de IA…"
@@ -2502,6 +2626,7 @@ function DocumentTab() {
             <div className="text-center">
               <p className="font-semibold text-[#222222]">Arrastra tu documento aquí o haz clic para seleccionarlo</p>
               <p className="mt-1 text-sm text-[#757575]">PDF, DOCX, DOC, TXT, CSV · Procesamiento 100% local</p>
+              <p className="mt-0.5 text-xs text-[#aaaaaa]">Hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas · documentos de varias páginas admitidos</p>
             </div>
           )}
         </div>
@@ -2537,7 +2662,7 @@ function DocumentTab() {
             className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-3 font-mono text-sm text-[#222222] outline-none transition resize-y"
             onFocus={e => e.target.style.borderColor = '#b00020'}
             onBlur={e => e.target.style.borderColor = '#e5e5e5'}
-            rows={3}
+            rows={15}
             value={customTerms}
             onChange={e => setCustomTerms(e.target.value)}
             placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ\n(un término por línea)"}
@@ -2683,7 +2808,7 @@ function RecoverTab({ lastResult }) {
               <InfoIcon text="En Word: selecciona toda la tabla de equivalencias → Copiar → pega aquí. También funciona con el botón '📋 Copiar' de la tabla en la pestaña Texto." />
             </div>
             <textarea
-              rows={5}
+              rows={10}
               value={mappingText}
               onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
               className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 font-mono text-xs text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
@@ -2702,7 +2827,7 @@ function RecoverTab({ lastResult }) {
           <InfoIcon text="Pega aquí el texto que te devolvió ChatGPT, Claude u otro modelo. Las etiquetas [TAG_N] serán reemplazadas por los datos originales." />
         </div>
         <textarea
-          rows={8}
+          rows={18}
           value={modifiedText}
           onChange={e => { setModifiedText(e.target.value); setRecovered(null); }}
           className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 text-sm text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
