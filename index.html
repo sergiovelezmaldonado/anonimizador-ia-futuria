@@ -1018,6 +1018,35 @@ async function extractTextFromFile(file, onProgress) {
     onProgress('Cargando motor Word…');
     const mammoth = await loadMammoth();
     const arrayBuffer = await file.arrayBuffer();
+
+    // El .doc binario legado (Word 97-2003) NO es OOXML: es un contenedor OLE2/CFB
+    // que empieza por D0 CF 11 E0. mammoth solo lee .docx (un ZIP que empieza por
+    // 50 4B = "PK"), así que con un .doc real lanza «Could not find the body
+    // element: are you sure this is a docx file?» — un mensaje técnico en inglés
+    // que no le dice nada a quien subió su archivo. Se detecta por la firma del
+    // propio contenido, no por la extensión: un archivo renombrado miente.
+    const firma = new Uint8Array(arrayBuffer.slice(0, 8));
+    const esOLE2 = firma[0] === 0xd0 && firma[1] === 0xcf && firma[2] === 0x11 && firma[3] === 0xe0;
+    const esZip = firma[0] === 0x50 && firma[1] === 0x4b;
+
+    if (esOLE2) {
+      throw new Error(
+        'Este archivo es un .doc del formato antiguo de Word (97-2003), que esta herramienta no puede leer en el navegador.\n\n' +
+        'Cómo resolverlo en 10 segundos: ábrelo en Word y usa «Archivo → Guardar como» eligiendo ' +
+        '«Documento de Word (*.docx)». Vuelve a subirlo y funcionará.\n\n' +
+        'Alternativa inmediata: abre el documento, selecciona todo (Ctrl+A), copia y pega el texto ' +
+        'en la pestaña Texto.'
+      );
+    }
+    if (!esZip) {
+      throw new Error(
+        'El archivo no parece un documento de Word válido, aunque su nombre termine en .' + ext + '.\n\n' +
+        'Comprueba que no esté dañado ni renombrado desde otro formato. ' +
+        'Si no, copia el texto y pégalo en la pestaña Texto.'
+      );
+    }
+
+    onProgress('Extrayendo texto del documento…');
     const result = await mammoth.extractRawText({ arrayBuffer });
     return result.value;
   }
@@ -2165,6 +2194,8 @@ function AnonTab({ setLastResult }) {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerData, setViewerData] = useState(null);
   const outputRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -2262,6 +2293,22 @@ function AnonTab({ setLastResult }) {
       timestamp: new Date().toLocaleString('es'),
       originalLen: inputText.length,
     });
+  };
+
+  // El visor de documento solo existía en la pestaña Documento, así que quien
+  // trabajaba pegando texto no sabía que estaba ahí. Se abre también desde aquí.
+  const openViewer = () => {
+    if (!result) return;
+    const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
+    setViewerData({
+      anonText: result.out,
+      reps: result.reps,
+      cats: allCats,
+      activeCats: effectiveActiveCats,
+      fileName: null,
+      originalLen: inputText.length,
+    });
+    setViewerOpen(true);
   };
 
   const riskData = result ? computeResidualRisk(result.out) : null;
@@ -2433,6 +2480,9 @@ function AnonTab({ setLastResult }) {
                 <AppButton variant="secondary" onClick={copyOutput} disabled={!canExport}>
                   {copied ? '✓ Copiado' : '📋 Copiar texto'}
                 </AppButton>
+                <AppButton variant="secondary" onClick={openViewer}>
+                  🔎 Ver como documento
+                </AppButton>
                 <AppButton onClick={downloadDocs} disabled={!canExport}>
                   ↓ Descargar .doc
                 </AppButton>
@@ -2527,6 +2577,20 @@ function AnonTab({ setLastResult }) {
           <p className="text-sm text-[#757575] mb-4">Pega texto directamente o elige una plantilla de 50 tipos de documentos reales.</p>
           <AppButton variant="secondary" onClick={() => setShowTemplates(true)}>📋 Ver plantillas de ejemplo</AppButton>
         </div>
+      ) : null}
+
+      {/* Visor de documento, también disponible desde esta pestaña */}
+      {viewerOpen && viewerData ? (
+        <DocumentViewer
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          anonText={viewerData.anonText}
+          reps={viewerData.reps}
+          cats={viewerData.cats}
+          activeCats={viewerData.activeCats}
+          fileName={viewerData.fileName}
+          originalLen={viewerData.originalLen}
+        />
       ) : null}
     </div>
   );
@@ -2625,7 +2689,7 @@ function DocumentTab() {
           ) : (
             <div className="text-center">
               <p className="font-semibold text-[#222222]">Arrastra tu documento aquí o haz clic para seleccionarlo</p>
-              <p className="mt-1 text-sm text-[#757575]">PDF, DOCX, DOC, TXT, CSV · Procesamiento 100% local</p>
+              <p className="mt-1 text-sm text-[#757575]">PDF, DOCX, TXT, CSV · Procesamiento 100% local</p>
               <p className="mt-0.5 text-xs text-[#aaaaaa]">Hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas · documentos de varias páginas admitidos</p>
             </div>
           )}
