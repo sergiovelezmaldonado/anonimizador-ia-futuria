@@ -1,7 +1,8 @@
-// Verifica los 3 cambios de interfaz pedidos por Sergio:
-// 1) Terminos personalizados mas grande (>=15 lineas)
-// 2) Texto a anonimizar mas grande
-// 3) "Ver plantillas" abre una ventana emergente centrada, no un panel que empuja la pagina
+// Verifica los 3 cambios de interfaz pedidos por Sergio, adaptados a la Fase 0:
+// 1) Terminos personalizados: ya no son 15 filas fijas; es un campo que CRECE al escribir
+//    (minimo 3 filas, la altura aumenta al pegar 10 lineas) dentro del panel 'Qué ocultar' (colapsado).
+// 2) Texto a anonimizar grande (#input-text, rows=14)
+// 3) "📋 Plantillas de ejemplo" abre una ventana emergente centrada, no un panel que empuja la pagina
 const CDP = 'http://127.0.0.1:9334';
 const URL_APP = 'http://localhost:5199/';
 import { writeFileSync } from 'node:fs';
@@ -26,41 +27,45 @@ async function main() {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const checks = [];
   const check = (n, ok, d) => checks.push({ n, ok: !!ok, d });
+  const setValue = (sel, val) => ev(`(()=>{const t=document.querySelector(${JSON.stringify(sel)});if(!t)return false;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,${JSON.stringify(val)});t.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
 
   await send('Runtime.enable'); await send('Page.enable');
+  errs.length = 0;
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 950, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: URL_APP });
   await sleep(9000);
 
   check('la app arranca sin excepciones', errs.length === 0, errs.join(' | '));
 
-  // --- pestana Texto ---
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>x.innerText.trim()==='Texto');b&&b.click();})()`);
-  await sleep(1800);
+  // --- pestaña de trabajo (aterriza ahí) y abrir el panel de ajustes colapsado ---
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+  await sleep(1000);
+  const abrioAjustes = await ev(`(()=>{const b=[...document.querySelectorAll('button[aria-expanded]')].find(x=>/Ajustar/.test(x.innerText));if(!b)return 'sin boton';if(b.getAttribute('aria-expanded')==='false')b.click();return b.getAttribute('aria-expanded');})()`);
+  await sleep(600);
+  check('el panel "Qué ocultar" se abre con Ajustar (aria-expanded)', await ev(`document.querySelector('button[aria-controls="cats-body"]')?.getAttribute('aria-expanded')==='true' && !document.getElementById('cats-body').hidden`), 'estado=' + abrioAjustes);
 
-  const medidas = await ev(`JSON.stringify((()=>{
-    const tas=Array.from(document.querySelectorAll('textarea'));
-    return tas.map(t=>({
-      ph:(t.placeholder||'').slice(0,28),
-      rows:t.rows,
-      alturaPx: Math.round(t.getBoundingClientRect().height),
-      lineas: Math.round(t.getBoundingClientRect().height / parseFloat(getComputedStyle(t).lineHeight||'20'))
-    }));
+  const medir = () => ev(`JSON.stringify((()=>{
+    const pick=(sel)=>{const t=document.querySelector(sel);if(!t)return null;return {ph:(t.placeholder||'').slice(0,28),rows:t.rows,alturaPx:Math.round(t.getBoundingClientRect().height),lineas:Math.round(t.getBoundingClientRect().height/parseFloat(getComputedStyle(t).lineHeight||'20'))}};
+    return {terminos:pick('#custom-terms'),whitelist:pick('#whitelist'),pegado:pick('#input-text')};
   })())`);
-  console.log('medidas de los textareas:', medidas);
-  const tas = JSON.parse(medidas);
+  const antes = JSON.parse(await medir());
+  console.log('medidas de los textareas:', JSON.stringify(antes));
+  const { terminos, pegado } = antes;
 
-  const terminos = tas.find(t => /Juan P/i.test(t.ph));
-  const pegado = tas.find(t => /Pega aqu/i.test(t.ph));
-  check('Términos personalizados tiene 15 filas', terminos && terminos.rows === 15, terminos ? 'rows=' + terminos.rows + ' alto=' + terminos.alturaPx + 'px' : 'no encontrado');
-  check('Términos personalizados muestra >=15 lineas', terminos && terminos.lineas >= 14, terminos ? '~' + terminos.lineas + ' lineas visibles' : '');
-  check('Texto a anonimizar tiene 24 filas', pegado && pegado.rows === 24, pegado ? 'rows=' + pegado.rows + ' alto=' + pegado.alturaPx + 'px' : 'no encontrado');
-  check('Texto a anonimizar es mas alto que antes (>400px)', pegado && pegado.alturaPx > 400, pegado ? pegado.alturaPx + 'px' : '');
+  check('Términos personalizados tiene al menos 3 filas (crece al escribir)', terminos && terminos.rows >= 3, terminos ? 'rows=' + terminos.rows + ' alto=' + terminos.alturaPx + 'px' : 'no encontrado');
+  await setValue('#custom-terms', Array.from({ length: 10 }, (_, i) => 'Término ' + (i + 1)).join('\n'));
+  await sleep(500);
+  const despues = JSON.parse(await medir());
+  check('Términos personalizados crece al pegar 10 líneas (>=9 líneas visibles)', despues.terminos && despues.terminos.alturaPx > terminos.alturaPx + 60 && despues.terminos.lineas >= 9,
+    despues.terminos ? terminos.alturaPx + 'px -> ' + despues.terminos.alturaPx + 'px (~' + despues.terminos.lineas + ' lineas)' : '');
+  await setValue('#custom-terms', ''); await sleep(300);
+  check('Texto a anonimizar tiene 14 filas', pegado && pegado.rows === 14, pegado ? 'rows=' + pegado.rows + ' alto=' + pegado.alturaPx + 'px' : 'no encontrado');
+  check('Texto a anonimizar es alto (>300px)', pegado && pegado.alturaPx > 300, pegado ? pegado.alturaPx + 'px' : '');
 
   // --- ventana emergente de plantillas ---
   const scrollAntes = await ev('window.scrollY');
-  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ver plantillas/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
-  check('existe el boton "Ver plantillas"', abrio);
+  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Plantillas de ejemplo/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
+  check('existe el boton "📋 Plantillas de ejemplo"', abrio);
   await sleep(1500);
 
   const modal = await ev(`JSON.stringify((()=>{
@@ -102,16 +107,27 @@ async function main() {
   check('se cierra con Escape', (await ev(`!document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]')`)), null);
   check('se restaura el scroll del fondo', (await ev('document.body.style.overflow')) !== 'hidden', null);
 
-  // seleccionar una plantilla sigue funcionando
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ver plantillas/i.test(x.innerText));b&&b.click();})()`);
+  // seleccionar una plantilla sigue funcionando (sin texto previo no pide confirmación)
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Plantillas de ejemplo/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1200);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelector('.grid button'); b&&b.click();})()`);
   await sleep(1500);
-  const cargada = await ev(`(()=>{const tas=Array.from(document.querySelectorAll('textarea'));
-    const ta=tas.find(t=>/Pega aqu/i.test(t.placeholder||'')); return ta?ta.value.length:0;})()`);
+  const cargada = await ev(`(()=>{const ta=document.querySelector('#input-text'); return ta?ta.value.length:0;})()`);
   check('al elegir una plantilla se carga el texto', cargada > 100, 'chars=' + cargada);
   check('la ventana se cierra al elegir', (await ev(`!document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]')`)), null);
+
+  // con texto previo, elegir otra plantilla pide confirmación con diálogo propio (Reemplazar)
+  await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Plantillas de ejemplo/i.test(x.innerText));b&&b.click();})()`);
+  await sleep(1000);
+  await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
+    const b=d&&d.querySelectorAll('.grid button')[1]; b&&b.click();})()`);
+  await sleep(600);
+  check('reemplazar texto existente pide confirmación propia (no confirm nativo)', await ev(`window.__nativeConfirm===0 && !!document.querySelector('[role=alertdialog]') && /Reemplazar/.test(document.querySelector('[role=alertdialog]').innerText)`));
+  await ev(`[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/Reemplazar/.test(b.textContent))?.click()`);
+  await sleep(600);
+  check('tras Reemplazar se carga la nueva plantilla y se cierran los diálogos', await ev(`!document.querySelector('[role=alertdialog]') && !document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]') && document.querySelector('#input-text').value.length>100`));
 
   const fail = checks.filter(c => !c.ok);
   console.log('\n=== CAMBIOS DE INTERFAZ ===');

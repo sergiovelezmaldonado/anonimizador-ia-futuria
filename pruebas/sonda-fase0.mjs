@@ -1,0 +1,76 @@
+// Humo de la Fase 0 en el navegador real: compila, renderiza, flujo completo, sin peticiones de red con contenido.
+const CDP = 'http://127.0.0.1:9334';
+const list = await (await fetch(CDP + '/json/list')).json();
+const page = list.find(t => t.type === 'page');
+const ws = new WebSocket(page.webSocketDebuggerUrl);
+let id = 0; const pending = new Map(); const errors = [];
+await new Promise(r => ws.addEventListener('open', r));
+ws.addEventListener('message', ev => { const m = JSON.parse(ev.data); if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(m.params.args.map(a => a.value || a.description).join(' ')); });
+const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
+const ev = async expr => { const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'eval'); return r.result.result.value; };
+const pause = ms => new Promise(r => setTimeout(r, ms));
+const click = async txt => ev(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim().startsWith(${JSON.stringify(txt)}));if(!b)return false;b.click();return true})()`);
+let ok = 0, fail = 0; const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log((cond ? '✔ ' : '✖ ') + name + (cond ? '' : '  ' + extra)); };
+await send('Runtime.enable'); await send('Page.enable');
+await send('Page.navigate', { url: 'http://localhost:5199/?t=' + Date.now() });
+await pause(4500);
+check('sin errores de compilación/runtime', errors.length === 0, errors.slice(0, 3).join(' | '));
+check('aterriza en la pestaña de trabajo', await ev(`!!document.querySelector('#input-text')`));
+check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===4`));
+check('botón Probar con un ejemplo', await click('Probar con un ejemplo')); await pause(600);
+check('resultado con etiquetas', await ev(`(document.body.innerText.match(/\\[[A-Z_]+_\\d+\\]/g)||[]).length>=6`));
+check('semáforo no bloquea el ejemplo (categorías inactivas solo avisan)', await ev(`!document.querySelector('input[data-review]').disabled`));
+check('aviso de categorías desactivadas visible', await ev(`/categor[ií]as desactivadas/i.test(document.body.innerText)`));
+check('etiquetas son botones (sin hover ni title)', await ev(`document.querySelectorAll('button.anon').length>=6 && !document.querySelector('button.anon[title]')`));
+await ev(`document.querySelector('button.anon').click()`); await pause(100);
+check('tocar una etiqueta muestra el original', await ev(`!!document.querySelector('[role=dialog][aria-label="Dato original"]')`));
+check('botón de lista blanca en el popover', await ev(`/lista blanca/i.test(document.querySelector('[role=dialog][aria-label="Dato original"]').innerText)`));
+check('llave de recuperación con aviso de guardado', await ev(`/Guardar llave/.test(document.body.innerText) && /no podrás recuperar/i.test(document.body.innerText)`));
+check('copiar bloqueado antes de revisar', await ev(`[...document.querySelectorAll('button')].find(b=>/Copiar para la IA/.test(b.textContent)).disabled`));
+await ev(`document.querySelector('input[data-review]').click()`); await pause(150);
+check('copiar habilitado tras revisar', await ev(`![...document.querySelectorAll('button')].find(b=>/Copiar para la IA/.test(b.textContent)).disabled`));
+await ev(`window.__copied='';navigator.clipboard.writeText=t=>{window.__copied=t;return Promise.resolve()}`);
+await click('📋 Copiar para la IA'); await pause(200);
+check('copiar para la IA incluye instrucción y sin originales', await ev(`/Consérvalas exactamente/.test(window.__copied) && !/María García/.test(window.__copied)`));
+check('aria-live presente', await ev(`document.querySelectorAll('[role=status][aria-live]').length>=1`));
+// el tooltip «?» se cierra al desplazar la página (no queda huérfano tapando el header)
+await ev(`document.querySelector('button[aria-label="Más información"]').click()`); await pause(100);
+check('tooltip abierto en portal', await ev(`!!document.querySelector('[data-popover][role=tooltip]')`));
+await ev(`window.scrollBy(0, 200)`); await pause(150);
+check('tooltip se cierra al hacer scroll', await ev(`!document.querySelector('[data-popover][role=tooltip]')`));
+check('header sticky opaco', await ev(`getComputedStyle(document.querySelector('.sticky.top-0')).backgroundColor==='rgb(255, 255, 255)'`));
+// los campos de términos y lista blanca muestran al menos 3 líneas al abrir el panel (no recortan el placeholder)
+await ev(`[...document.querySelectorAll('button')].find(b=>/Ajustar/.test(b.textContent)).click()`); await pause(200);
+const termsH = await ev(`document.querySelector('#custom-terms').getBoundingClientRect().height`);
+check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto=' + termsH);
+check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
+// diálogos propios: Limpiar no usa window.confirm
+await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
+await click('Limpiar'); await pause(150);
+check('Limpiar abre diálogo propio, no confirm nativo', await ev(`window.__nativeConfirm===0 && !!document.querySelector('[role=alertdialog]')`));
+await ev(`[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/Borrar/.test(b.textContent)).click()`); await pause(150);
+check('diálogo cerrado y texto borrado', await ev(`!document.querySelector('[role=alertdialog]') && document.querySelector('#input-text').value===''`));
+// Recuperar tolerante en la interfaz
+await ev(`document.querySelector('#input-text').focus()`);
+await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#input-text');s.call(t,'Cliente: Ana Ruiz, correo ana@x.test, cel 0991234567');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+await click('🔒 Ocultar datos sensibles'); await pause(400);
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Recuperar/.test(b.textContent)).click()`); await pause(300);
+await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#modified-text');s.call(t,'Hola [PERSONA 1], te escribo a **[EMAIL_1]** y PERSONA_1 al [PHONE_1].');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+await click('🔄 Recuperar datos originales'); await pause(300);
+const recoveredText = await ev(`document.querySelector('pre')?.innerText || ''`);
+check('recuperación tolerante en UI', /Hola Ana Ruiz, te escribo a \*\*ana@x\.test\*\* y Ana Ruiz al (?:cel )?0991234567/.test(recoveredText), JSON.stringify(recoveredText));
+check('indica etiquetas reparadas', await ev(`/reparadas/.test(document.body.innerText)`));
+check('valores restaurados resaltados', await ev(`document.querySelectorAll('pre mark').length>=3`));
+// móvil: visor legible a 360px
+await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 2, mobile: true }); await pause(300);
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Ocultar datos/.test(b.textContent)).click()`); await pause(300);
+// Al cambiar de pestaña la vista de trabajo se vuelve a montar: se procesa de nuevo el ejemplo.
+await click('Probar con un ejemplo'); await pause(500);
+await click('🔎 Ver como documento'); await pause(400);
+const padding = await ev(`(()=>{const d=[...document.querySelectorAll('[role=dialog]')].find(x=>/Documento seudonimizado/.test(x.getAttribute('aria-label')||''));const el=d&&d.querySelector('.max-w-3xl');return el?parseFloat(getComputedStyle(el).paddingLeft):-1})()`);
+check('visor en móvil con margen fluido (<40px a 360px)', padding > 0 && padding < 40, 'padding=' + padding);
+check('sin desborde horizontal en móvil', await ev(`document.documentElement.scrollWidth<=360`));
+await send('Emulation.clearDeviceMetricsOverride');
+check('sin errores al final', errors.length === 0, errors.slice(0, 3).join(' | '));
+console.log('TOTAL: ' + (ok + fail) + ' | OK: ' + ok + ' | FALLAS: ' + fail);
+ws.close(); process.exit(fail ? 1 : 0);

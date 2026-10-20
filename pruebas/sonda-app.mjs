@@ -1,5 +1,7 @@
 // Sonda CDP del Anonimizador IA: carga, estilos, y flujo REAL de anonimizacion.
 // Requiere: servidor estatico en 5199 y Chrome headless con --remote-debugging-port=9334
+// Fase 0: una sola pestaña de trabajo ('🔒 Ocultar datos', fusiona Texto+Documento),
+// etiquetas del resultado como <button class="anon"> y <mark class="anon"> en la tabla.
 const URL_APP = 'http://localhost:5199/';
 const CDP = 'http://127.0.0.1:9334';
 
@@ -7,7 +9,7 @@ const TEXTO_PRUEBA = [
   'Estimado cliente, su cuenta IBAN ES9121000418450200051332 presenta saldo pendiente.',
   'Contacto: maria.lopez@acmecorp.com, telefono +52 55 1234 5678.',
   'RFC del titular: GODE561231GR8. CURP: GODE561231HDFNRN09.',
-  'Acceso de soporte: api_key=sk_live_EJEMPLO_FICTICIO_NO_REAL_33',
+  'Acceso de soporte: api_key=«redacted:sk_live_…»',
   'Servidor interno 192.168.14.22, portal https://intranet.acmecorp.com/clientes',
   'Monto adeudado: $85.340 con vencimiento el 15/03/2026.'
 ].join('\n');
@@ -45,6 +47,8 @@ async function main() {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   await send('Runtime.enable'); await send('Network.enable'); await send('Page.enable');
+  // Runtime.enable puede repetir excepciones de una prueba anterior: medir desde esta navegacion.
+  pageErrors.length = 0; netRequests.length = 0;
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: URL_APP });
   await sleep(9000);
@@ -60,30 +64,29 @@ async function main() {
   check('React monto el arbol', (await evalJs('document.getElementById("root").children.length')) >= 1);
   check('sin excepciones de pagina', pageErrors.length === 0, pageErrors.join(' | '));
 
-  // Tailwind REALMENTE aplicado (un 200 del CDN no lo prueba)
-  const br = await evalJs('(()=>{const e=document.querySelector("[class*=rounded]");return e?getComputedStyle(e).borderRadius:"no-el";})()');
+  // Tailwind REALMENTE aplicado (un 200 del CDN no lo prueba): cualquier AppButton lleva rounded-2xl.
+  const br = await evalJs('(()=>{const e=document.querySelector("button.rounded-2xl")||document.querySelector("[class*=rounded-2xl]");return e?getComputedStyle(e).borderRadius:"no-el";})()');
   check('Tailwind aplicado de verdad', br !== 'no-el' && br !== '0px', 'border-radius=' + br);
   const fuente = await evalJs('getComputedStyle(document.body).fontFamily');
   check('tipografia Inter', String(fuente).includes('Inter'), fuente);
 
-  // --- Pestanas esperadas ---
-  const tabs = JSON.parse(await evalJs('JSON.stringify(Array.from(document.querySelectorAll("button")).map(b=>b.innerText.trim()))'));
-  for (const t of ['Cómo usar', 'Texto', 'Documento', 'Privacidad'])
-    check('pestana presente: ' + t, tabs.some(x => x.includes(t)));
+  // --- Pestanas esperadas (patrón tablist de la Fase 0) ---
+  const tabs = JSON.parse(await evalJs('JSON.stringify(Array.from(document.querySelectorAll("[role=tablist] [role=tab]")).map(b=>b.innerText.trim()))'));
+  for (const t of ['Cómo usar', 'Ocultar datos', 'Privacidad'])
+    check('pestana presente: ' + t, tabs.some(x => x.includes(t)), 'tabs=' + tabs.join(' / '));
   check('pestana Recuperar presente', tabs.some(x => x.includes('Recuperar')));
+  check('la pestana de trabajo fusiona Texto y Documento (textarea + input de archivo juntos)',
+    await evalJs(`(()=>{const ta=document.querySelector('#input-text');return !!ta && !!ta.closest('section').querySelector('input[type=file]')})()`));
 
-  // --- Flujo real: ir a Texto, pegar, anonimizar ---
+  // --- Flujo real: ya aterriza en la pestaña de trabajo; pegar, anonimizar ---
   const fueATexto = await evalJs(`(()=>{
-    const b=Array.from(document.querySelectorAll('button')).find(x=>x.innerText.trim()==='Texto');
+    const b=Array.from(document.querySelectorAll('[role=tab]')).find(x=>/Ocultar datos/.test(x.innerText));
     if(!b) return false; b.click(); return true; })()`);
-  check('navega a pestana Texto', fueATexto);
-  await sleep(1500);
+  check('navega a la pestana de trabajo (Ocultar datos)', fueATexto && await evalJs(`!!document.querySelector('#input-text')`));
+  await sleep(1200);
 
   const pego = await evalJs(`(()=>{
-    // OJO: hay dos textareas (terminos personalizados + area de pegado).
-    // Hay que elegir el de pegado por su placeholder, no con querySelector('textarea').
-    const tas=Array.from(document.querySelectorAll('textarea'));
-    const ta=tas.find(t=>/pega aqu/i.test(t.placeholder||'')) || tas[tas.length-1];
+    const ta=document.getElementById('input-text');
     if(!ta) return 'no-textarea';
     const setter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
     setter.call(ta, ${JSON.stringify(TEXTO_PRUEBA)});
@@ -93,14 +96,14 @@ async function main() {
   await sleep(1200);
 
   const clicAnon = await evalJs(`(()=>{
-    const b=Array.from(document.querySelectorAll('button')).find(x=>/anonimizar/i.test(x.innerText)&&!x.disabled);
+    const b=Array.from(document.querySelectorAll('button')).find(x=>/Ocultar datos sensibles/.test(x.innerText)&&!x.disabled);
     if(!b) return false; b.click(); return true; })()`);
-  check('boton Anonimizar accionable', clicAnon);
+  check('boton Ocultar datos sensibles accionable', clicAnon);
   await sleep(3000);
 
   const txt = String(await evalJs('document.body.innerText'));
-  const marks = await evalJs('document.querySelectorAll("mark").length');
-  check('genera etiquetas <mark>', marks > 0, 'marks=' + marks);
+  const marks = await evalJs('document.querySelectorAll("button.anon").length');
+  check('genera etiquetas (button.anon en el resultado)', marks > 0, 'etiquetas=' + marks);
 
   // Etiquetas REALES que usa la app (tag de cada categoria en el codigo),
   // no los nombres de los ids: credential->CREDENCIAL, financial->CUENTA, fiscal->ID_FISCAL.
@@ -110,14 +113,11 @@ async function main() {
   for (const c of ['CUENTA', 'ID_FISCAL'])
     check('anonimiza categoria ' + c, new RegExp('\\[' + c).test(txt), null);
 
-  // La fuga se mide SOLO en el bloque anonimizado. La tabla de equivalencias
-  // muestra los originales a proposito (es lo que permite revertir), asi que
-  // buscar el dato crudo en todo el body da un falso positivo.
-  // El texto anonimizado vive en el <pre> que contiene los <mark>; el nivel superior
-  // engloba ademas la tabla de equivalencias, que muestra los originales A PROPOSITO
-  // (es lo que permite revertir). Medir la fuga ahi da un falso positivo.
+  // La fuga se mide SOLO en el bloque anonimizado (el <pre> que contiene los button.anon).
+  // La tabla de equivalencias muestra los originales A PROPOSITO (es lo que permite revertir);
+  // medir la fuga ahi da un falso positivo.
   const anonBlock = String(await evalJs(`(()=>{
-    const m=document.querySelector('mark'); if(!m) return '';
+    const m=document.querySelector('button.anon'); if(!m) return '';
     const pre=m.closest('pre');
     return pre ? pre.innerText : m.parentElement.innerText;
   })()`));
@@ -125,17 +125,18 @@ async function main() {
 
   const fugas = [];
   for (const [etq, dato] of [
-    ['apikey', 'sk_live_EJEMPLO_FICTICIO_NO_REAL_23'],
+    ['apikey', '«redacted:sk_live_…»'],
     ['email', 'maria.lopez@acmecorp.com'],
     ['IBAN', 'ES9121000418450200051332'],
     ['RFC', 'GODE561231GR8'],
   ]) if (anonBlock.includes(dato)) fugas.push(etq);
   check('ningun dato crudo en el bloque anonimizado', fugas.length === 0, fugas.length ? 'FUGA: ' + fugas.join(',') : 'sin fugas');
 
-  // La tabla de equivalencias SI debe conservar los originales (reversibilidad)
-  check('tabla de equivalencias conserva originales', txt.includes('maria.lopez@acmecorp.com'), null);
+  // La tabla de equivalencias SI debe conservar los originales (reversibilidad), con <mark class="anon">.
+  const marksTabla = await evalJs('document.querySelectorAll("table mark.anon").length');
+  check('tabla de equivalencias conserva originales', txt.includes('maria.lopez@acmecorp.com') && marksTabla > 0, 'marks en tabla=' + marksTabla);
 
-  check('muestra semaforo de riesgo residual', /riesgo/i.test(txt), null);
+  check('muestra semaforo de riesgo residual', /riesgo/i.test(txt) && await evalJs(`!!document.querySelector('[role=region][aria-label="Estado de revisión"] input[data-review]')`), null);
 
   // --- Privacidad: ninguna peticion a un backend ---
   const dominios = [...new Set(netRequests.map(u => { try { return new URL(u).host; } catch { return u; } }))];
@@ -152,6 +153,7 @@ async function main() {
     const r = JSON.parse(await evalJs('JSON.stringify({i:window.innerWidth,s:document.documentElement.scrollWidth})'));
     check('sin desbordamiento a ' + w + 'px', r.s <= r.i + 2, JSON.stringify(r));
   }
+  await send('Emulation.clearDeviceMetricsOverride');
 
   const fallidas = checks.filter(c => !c.ok);
   console.log('\n=== SONDA ANONIMIZADOR IA ===');

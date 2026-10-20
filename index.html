@@ -37,6 +37,7 @@
 
 <script type="text/babel">
 const { useState, useRef, useMemo } = React;
+const APP_VERSION = '1.0.0-fase0';
 
 function cn(...classes) { return classes.filter(Boolean).join(' '); }
 
@@ -51,38 +52,104 @@ function formatMoneyRange(value) {
   return '$~' + fmt(low) + '–' + fmt(high);
 }
 
-// ─── Categorías ───────────────────────────────────────────────────────────────
+// ─── Validadores por dígito verificador ───────────────────────────────────────
+// Sirven para priorizar y marcar «válido» en la tabla; NUNCA para descartar un dato.
+const digitsOf = v => String(v).replace(/\D/g, '');
+const VALIDATORS = {
+  LUHN(v) { const n = digitsOf(v); if (n.length < 12) return false; let s = 0, alt = false; for (let i = n.length - 1; i >= 0; i--) { let x = +n[i]; if (alt) { x *= 2; if (x > 9) x -= 9; } s += x; alt = !alt; } return s % 10 === 0; },
+  IBAN(v) { const s = String(v).replace(/[\s\-]/g, '').toUpperCase(); if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(s)) return false; const r = s.slice(4) + s.slice(0, 4); let m = 0; for (const c of r) { m = (m * (c > '9' ? 100 : 10) + (c > '9' ? c.charCodeAt(0) - 55 : +c)) % 97; } return m === 1; },
+  EC_CEDULA(v) { const n = digitsOf(v); if (n.length !== 10) return false; const prov = +n.slice(0, 2); if (!((prov >= 1 && prov <= 24) || prov === 30)) return false; if (+n[2] > 6) return false; let s = 0; for (let i = 0; i < 9; i++) { let x = +n[i] * (i % 2 ? 1 : 2); if (x > 9) x -= 9; s += x; } return (10 - s % 10) % 10 === +n[9]; },
+  EC_RUC(v) { const n = digitsOf(v); return n.length === 13 && VALIDATORS.EC_CEDULA(n.slice(0, 10)) && n.slice(10) === '001'; },
+  CL_RUT(v) { const m = String(v).replace(/\./g, '').toUpperCase().match(/^(\d{7,8})-?([\dK])$/); if (!m) return false; let s = 0, k = 2; for (const c of [...m[1]].reverse()) { s += +c * k; k = k === 7 ? 2 : k + 1; } const r = 11 - s % 11; return (r === 11 ? '0' : r === 10 ? 'K' : String(r)) === m[2]; },
+  AR_CUIT(v) { const n = digitsOf(v); if (n.length !== 11) return false; const w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]; let s = 0; for (let i = 0; i < 10; i++) s += +n[i] * w[i]; let r = 11 - s % 11; if (r === 11) r = 0; if (r === 10) return false; return r === +n[10]; },
+  AR_CBU(v) { const n = digitsOf(v); if (n.length !== 22) return false; const chk = (s, w) => { let t = 0; for (let i = 0; i < s.length; i++) t += +s[i] * w[i % w.length]; return (10 - t % 10) % 10; }; return chk(n.slice(0, 7), [7, 1, 3, 9, 7, 1, 3]) === +n[7] && chk(n.slice(8, 21), [3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3]) === +n[21]; },
+  CO_NIT(v) { const n = digitsOf(v); if (n.length < 8 || n.length > 11) return false; const w = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71]; const body = n.slice(0, -1), dv = +n.slice(-1); let s = 0; [...body].reverse().forEach((c, i) => { s += +c * w[i]; }); const r = s % 11; return (r > 1 ? 11 - r : r) === dv; },
+  MX_CURP(v) { const s = String(v); if (!/^[A-Z][AEIOUX][A-Z]{2}\d{6}[HM](?:AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QT|QR|SP|SL|SR|TC|TS|TL|VZ|YN|NE)[B-DF-HJ-NP-TV-Z]{3}[A-Z\d]\d$/.test(s)) return false; if (!validYYMMDD(s.slice(4, 10))) return false; const chars = '0123456789ABCDEFGHIJKLMNÑOPQRSTUVWXYZ'; let t = 0; for (let i = 0; i < 17; i++) t += chars.indexOf(s[i]) * (18 - i); return (10 - t % 10) % 10 === +s[17]; },
+  MX_RFC(v) { const s = String(v); return /^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$/.test(s) && validYYMMDD(s.replace(/^[A-ZÑ&]{3,4}/, '').slice(0, 6)); },
+  MX_CLABE(v) { const n = digitsOf(v); if (n.length !== 18) return false; const w = [3, 7, 1]; let s = 0; for (let i = 0; i < 17; i++) s += (+n[i] * w[i % 3]) % 10; return (10 - s % 10) % 10 === +n[17]; },
+  PE_RUC(v) { const n = digitsOf(v); if (n.length !== 11 || !/^(?:10|15|16|17|20)/.test(n)) return false; const w = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]; let s = 0; for (let i = 0; i < 10; i++) s += +n[i] * w[i]; let r = 11 - s % 11; if (r >= 10) r -= 10; return r === +n[10]; },
+  UY_CI(v) { const n = digitsOf(v).padStart(8, '0'); if (n.length !== 8) return false; const w = [2, 9, 8, 7, 6, 3, 4]; let s = 0; for (let i = 0; i < 7; i++) s += +n[i] * w[i]; return (10 - s % 10) % 10 === +n[7]; },
+  SV_DUI(v) { const n = digitsOf(v); if (n.length !== 9) return false; let s = 0; for (let i = 0; i < 8; i++) s += +n[i] * (9 - i); return (10 - s % 10) % 10 === +n[8]; },
+  BR_CPF(v) { const n = digitsOf(v); if (n.length !== 11 || /^(\d)\1+$/.test(n)) return false; const dv = (len) => { let s = 0; for (let i = 0; i < len; i++) s += +n[i] * (len + 1 - i); const r = (s * 10) % 11; return r === 10 ? 0 : r; }; return dv(9) === +n[9] && dv(10) === +n[10]; },
+  BR_CNPJ(v) { const n = digitsOf(v); if (n.length !== 14) return false; const dv = (len) => { const w = len === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]; let s = 0; for (let i = 0; i < len; i++) s += +n[i] * w[i]; const r = s % 11; return r < 2 ? 0 : 11 - r; }; return dv(12) === +n[12] && dv(13) === +n[13]; },
+};
+function validYYMMDD(s) {
+  if (!/^\d{6}$/.test(s)) return false;
+  const mm = +s.slice(2, 4), dd = +s.slice(4, 6);
+  return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
+}
+
+// ─── Nombres de personas por contexto ─────────────────────────────────────────
+const PERSON_CONTEXTS = [
+  'nombre(?: completo)?', 'paciente', 'emplead[oa]', 'trabajador[ae]?', 'colaborador[ae]?', 'evaluad[oa]', 'evaluador[ae]?', 'representad[oa] por', 'representante(?: legal)?',
+  'firmante', 'firma(?: (?:del?|el)? ?(?:empleador|trabajador|cliente|proveedor|contratista|contratante))?', 'contacto(?: (?:RRHH|comercial|de emergencia|principal))?', 'estudiante', 'alumn[oa]', 'beneficiari[oa]', 'titular',
+  'proveedor[a]?', 'cliente', 'contratante', 'contratista', 'contraparte', 'apoderad[oa]', 'poderdante', 'cedente', 'cesionari[oa]', 'arrendador[a]?', 'arrendatari[oa]', 'deudor[a]?', 'acreedor[a]?', 'garante', 'fiador[a]?',
+  'testigo', 'candidat[oa]', 'postulante', 'jefe inmediato', 'supervisor[a]?', 'gerente', 'director[a]?', 'vendedor[a]?', 'comprador[a]?', 'asesor[a]?', 'ejecutiv[oa] de cuenta', 'referencia(?: laboral| personal)?', 'solicitante', 'responsable', 'encargad[oa]', 'socio', 'accionista', 'autorizad[oa] por', 'aprobad[oa] por', 'elaborad[oa] por', 'revisad[oa] por', 'recibid[oa] por', 'entregad[oa] a', 'dirigid[oa] a', 'a la atenci[oó]n de',
+  'identificad[oa] con', 'comparece', 'yo', 'estimad[oa]s?', 'querid[oa]s?', 'señor(?:es|as?|a)?', 'Sr\\.?', 'Sra\\.?', 'Srta\\.?', 'Dr\\.?', 'Dra\\.?', 'Lic\\.?', 'Ing\\.?', 'Abg\\.?', 'Mg\\.?', 'Arq\\.?', 'Cont\\.?', 'Econ\\.?', 'Don', 'Doña', 'atentamente', 'atte\\.?', 'cordialmente', 'saludos(?: cordiales)?', 'un saludo',
+  'dear', 'mr\\.?', 'mrs\\.?', 'ms\\.?', 'miss', 'attn\\.?', 'attention', 'buyer', 'seller', 'from', 'to', 'cc', 'signed(?: by)?', 'prepared by', 'approved by', 'reviewed by', 'contact', 'customer', 'supplier', 'vendor', 'employee', 'manager', 'regards', 'best regards', 'kind regards', 'sincerely', 'thanks',
+];
+const PERSON_NOT_NAMES = /\b(?:Gerente|General|Director[ae]?|Departamento|Recursos|Humanos|Banco|Hospital|Universidad|Contrato|Datos|Software|Senior|Marketing|Tecnología|Sistemas|Soluciones|Grupo|Empresa|Cliente|Equipo|Servicio|Ventas|Finanzas|Administración|Operaciones|Compras|Logística|Legal|Comercial|Nacional|Internacional|Limitada|Anónima|Sociedad|Compañía|Corporación|Fundación|Asociación|Cooperativa|Ministerio|Municipio|Gobierno|Instituto|Colegio|Escuela|Clínica|Centro|Oficina|Sucursal|Agencia|Zona|Región|Norte|Sur|Este|Oeste|Central|Principal|Jefe|Jefa|Supervisor|Analista|Consultor|Asistente|Coordinador|Presidente|Secretario|Tesorero|Vocal|Socio|Titular|Suplente|Página|Anexo|Cláusula|Artículo|Capítulo|Sección|Fecha|Lugar|Ciudad|País|Estado|Provincia|Cantón|Distrito|Calle|Avenida|Carrera|Total|Subtotal|Iva|Cantidad|Precio|Monto|Valor|Saldo|Factura|Pedido|Orden|Referencia|Asunto|Objeto|Plazo|Vigencia|Garantía|Proyecto|Producto|Marca|Modelo|Serie|Lote|Unidad|Caja|Bodega|Sede|Planta|S\.?A\.?S?|S\.?R\.?L\.?|Ltda\.?|Cía\.?|Inc\.?|Corp\.?|LLC|Ltd\.?|SpA|E\.?I\.?R\.?L\.?)\b/i;
+const CAPS_ONLY_NOT_NAMES = /\b(?:BANCO|HOSPITAL|UNIVERSIDAD|GERENTE|GENERAL|DIRECTOR|CONTRATO|CLÁUSULA|CLAUSULA|ARTÍCULO|ARTICULO|ANEXO|SOCIEDAD|COMPAÑÍA|COMPANIA|EMPRESA|GRUPO|CORPORACIÓN|CORPORACION|FUNDACIÓN|FUNDACION|MINISTERIO|GOBIERNO|INSTITUTO|CENTRO|SERVICIOS?|SOLUCIONES|SISTEMAS|TECNOLOG[ÍI]A|COMERCIAL|INDUSTRIAL|NACIONAL|INTERNACIONAL|LIMITADA|AN[ÓO]NIMA|S\.?A\.?S?|S\.?R\.?L\.?|LTDA\.?|C[ÍI]A\.?|INC\.?|CORP\.?|LLC|LTD\.?|SPA|E\.?I\.?R\.?L\.?|DEL|DE|LA|LAS|LOS|Y|E)\b/;
 function getPersonPatterns(text) {
   // Heurística contextual, no reconocimiento general de entidades. Puede omitir nombres.
-  const contexts = /\b(?:nombre(?: completo)?|paciente|emplead[oa]|trabajador[ae]?|evaluador[ae]?|representad[oa] por|representante|firmante|firma(?: empleador| trabajador)?|contacto(?: RRHH)?|estudiante|alumn[oa]|beneficiari[oa]|titular|estimad[oa]|señor[ae]?|Sr\.?|Sra\.?|Dr\.?|Dra\.?|atentamente|saludos)[\t ]*[:.,]?[\t ]*(?:\r?\n[\t ]*)?/gi;
-  const name = /^[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+(?:[\t ]+(?:(?:de|del|la|las|los)[\t ]+)*[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+){1,5}/;
-  const notNames = /\b(?:Gerente|General|Director[ae]?|Departamento|Recursos|Humanos|Banco|Hospital|Universidad|Contrato|Datos|Software|Senior|Marketing|Tecnología|Sistemas|Soluciones|Grupo|Empresa|Cliente|Equipo|Servicio)\b/;
+  const source = String(text || '');
+  const contexts = new RegExp('(?<![\\p{L}\\p{N}])(?:' + PERSON_CONTEXTS.join('|') + ')[\\t ]*[:.,]?[\\t ]*(?:\\r?\\n[\\t ]*)?', 'giu');
+  const name = /^[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+(?:[\t ]+(?:(?:de|del|la|las|los|y|e|van|von|da|di|do)[\t ]+)*[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+){1,5}/;
+  const capsName = /^[A-ZÁÉÍÓÚÑÜ]{2,}(?:[\t ]+(?:(?:DE|DEL|LA|LAS|LOS|Y|E|VAN|VON|DA|DI|DO)[\t ]+)*[A-ZÁÉÍÓÚÑÜ]{2,}){1,5}/;
   const found = new Set();
   let context;
-  while ((context = contexts.exec(String(text || '')))) {
-    const match = name.exec(text.slice(contexts.lastIndex));
-    if (match && !notNames.test(match[0])) found.add(match[0]);
+  while ((context = contexts.exec(source))) {
+    const rest = source.slice(contexts.lastIndex);
+    const match = name.exec(rest);
+    if (match && !PERSON_NOT_NAMES.test(match[0])) { found.add(match[0]); continue; }
+    const caps = capsName.exec(rest);
+    if (caps) {
+      // Recorta siglas societarias y palabras no-nombre al final; descarta si queda una sola palabra.
+      const words = caps[0].split(/[\t ]+/);
+      while (words.length && CAPS_ONLY_NOT_NAMES.test(words[words.length - 1])) words.pop();
+      const content = words.filter(w => !/^(?:DE|DEL|LA|LAS|LOS|Y|E|VAN|VON|DA|DI|DO)$/.test(w));
+      if (content.length >= 2 && !content.some(w => CAPS_ONLY_NOT_NAMES.test(w))) found.add(words.join(' '));
+    }
   }
-  return [...found].sort((a, b) => b.length - a.length).map(value =>
-    new RegExp('(?<![\\p{L}\\p{N}_])' + value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}_])', 'giu'));
+  // Nombre ANTES de un identificador: «Roberto Hernández, C.C. 10.234.567», «ANA RUIZ, DNI 123».
+  const before = /([A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+(?:[\t ]+(?:(?:de|del|la|las|los|y|e)[\t ]+)*[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+){1,5}|[A-ZÁÉÍÓÚÑÜ]{2,}(?:[\t ]+(?:(?:DE|DEL|LA|LAS|LOS|Y|E)[\t ]+)*[A-ZÁÉÍÓÚÑÜ]{2,}){1,5})[\t ]*,?[\t ]*(?:(?:mayor de edad|de nacionalidad [a-záéíóúñ]+|con domicilio[^,\n]{0,40})[\t ]*,?[\t ]*)*(?:identificad[oa] (?:con|bajo)|portador[a]? de|titular de|con)?[\t ]*(?:la )?(?:RUC|CPF|CNPJ|NIT|RTN|CUIT|CUIL|CURP|RIF|RFC|DNI|C\.?I\.?|CIP|C\.?E\.?|RUT|RNC|DUI|DPI|CUI|NSS|C\.?C\.?|T\.?I\.?|c[eé]dula|pasaporte|documento)\b/gu;
+  for (const m of source.matchAll(before)) {
+    const cand = m[1];
+    if (/^[A-ZÁÉÍÓÚÑÜ'’\-\t ]+$/.test(cand)) {
+      const content = cand.split(/[\t ]+/).filter(w => !/^(?:DE|DEL|LA|LAS|LOS|Y|E)$/.test(w));
+      if (content.length >= 2 && !content.some(w => CAPS_ONLY_NOT_NAMES.test(w))) found.add(cand);
+    } else if (!PERSON_NOT_NAMES.test(cand)) found.add(cand);
+  }
+  if (!found.size) return [];
+  return buildNameRegex(found);
 }
+function buildNameRegex(found) {
+  // Un solo regex alternado (más largo primero): una pasada sobre el texto, no una por nombre.
+  const alternation = [...found].sort((a, b) => b.length - a.length).map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[\t ]+/g, '[\\t ]+')).join('|');
+  return [new RegExp('(?<![\\p{L}\\p{N}_])(?:' + alternation + ')(?![\\p{L}\\p{N}_])', 'giu')];
+}
+
+// ─── Categorías ───────────────────────────────────────────────────────────────
+const CURRENCY_PREFIX = '(?:US\\$|U\\$S|R\\$|RD\\$|C\\$|B\\/\\.|S\\/\\.?|Bs\\.?[SF]?\\.?|Gs\\.?|Q\\.?|L\\.?|₡|€|£|¥|\\$|USD|MXN|COP|ARS|CLP|PEN|BOB|PYG|UYU|VES|VED|GTQ|HNL|NIO|CRC|PAB|DOP|CUP|CUC|EUR|GBP|BRL|UF|UVT|UVR|UTM|UIT)';
+const CURRENCY_SUFFIX = '(?:USD|MXN|COP|ARS|CLP|PEN|BOB|PYG|UYU|VES|VED|GTQ|HNL|NIO|CRC|PAB|DOP|CUP|EUR|BRL|UF|UVT|UVR|UTM|UIT|d[oó]lares|pesos|soles|bol[ií]vares|bolivianos|guaran[ií]es|quetzales|lempiras|c[oó]rdobas|colones|balboas|euros|reales)';
+const NUMBER = '\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?';
 
 const CATS = [
   {
     id: 'person', label: 'Nombres de personas (por contexto)',
-    ex: 'Paciente: María García · Sr. Carlos López',
-    color: '#be185d', bg: '#fdf2f8', border: '#fbcfe8', tag: 'PERSONA',
+    ex: 'Cliente: María García · REPRESENTANTE: JUAN PÉREZ · Dear Mr. Smith',
+    color: '#be185d', bg: '#fdf2f8', border: '#fbcfe8', tag: 'PERSONA', icon: '👤',
     on: true, pats: []
   },
   {
     id: 'credentials',
     label: 'Credenciales y API keys',
-    ex: 'api_key=abc123, sk_live_EJEMPLO_FICTICIO, password: secreta',
-    color: '#dc2626', bg: '#fef2f2', border: '#fecaca', tag: 'CREDENCIAL',
+    ex: 'api_key=abc123, «redacted:sk_live_…», password: secreta',
+    color: '#dc2626', bg: '#fef2f2', border: '#fecaca', tag: 'CREDENCIAL', icon: '🔑',
     on: true, alwaysOn: true,
     pats: [
       /\b(?:sk_live|sk_test|sk_proj)[A-Za-z0-9_\-]{10,}/g,
-      /\b(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|auth[_\-]?token|client[_\-]?secret|password|contraseña)(?:\s*[:=]\s*|[\t ]+(?![:=]))(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s'"]+)/gi,
+      /\b(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|auth[_\-]?token|client[_\-]?secret|password|contraseña|clave(?: de acceso)?)(?:\s*[:=]\s*|[\t ]+(?![:=]))(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s'"]+)/gi,
       /\bbearer\s+[A-Za-z0-9_\-.]{10,}/gi,
     ]
   },
@@ -90,7 +157,7 @@ const CATS = [
     id: 'url',
     label: 'URLs y dominios',
     ex: 'https://empresa.com/docs/contrato',
-    color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', tag: 'URL',
+    color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', tag: 'URL', icon: '🔗',
     on: true,
     pats: [
       /https?:\/\/[^\s"'<>)\]]+/gi,
@@ -101,136 +168,223 @@ const CATS = [
     id: 'email',
     label: 'Correos electrónicos',
     ex: 'maria.garcia@empresa.com',
-    color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', tag: 'EMAIL',
+    color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', tag: 'EMAIL', icon: '✉️',
     on: true,
     pats: [/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/gi]
   },
   {
     id: 'financial',
-    label: 'Cuentas financieras (IBAN / tarjetas)',
-    ex: 'ES91 2100 0418 4502 0005 1332',
-    color: '#065f46', bg: '#ecfdf5', border: '#a7f3d0', tag: 'CUENTA',
+    label: 'Cuentas financieras (IBAN, tarjetas, CLABE, CBU)',
+    ex: 'ES91 2100 0418 4502 0005 1332 · CLABE 002010077777777771',
+    color: '#065f46', bg: '#ecfdf5', border: '#a7f3d0', tag: 'CUENTA', icon: '🏦',
     on: true,
     pats: [
-      /\b[A-Z]{2}\d{2}[\s\-]?(?:\d{4}[\s\-]?){4,6}\b/gi,
-      /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g,
-      /\b(?:cuenta(?:[\t ]+(?:corriente|ahorros|bancaria|depósito|dep[oó]sito))?)[\t :#]*(?:(?:No\.?|Nro\.?|número)[\t ]*)?[\d][\d .\-/]{5,25}\d\b/gi,
+      { re: /\b[A-Z]{2}\d{2}[\s\-]?(?:\d{4}[\s\-]?){4,6}\b/gi, validate: 'IBAN' },
+      { re: /\b(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2})|36\d{2}|38\d{2})[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{3,4}\b/g, validate: 'LUHN' },
+      { re: /\b(?:cuenta(?:[\t ]+(?:corriente|ahorros|bancaria|depósito|dep[oó]sito|cliente|proveedor|contable|de n[oó]mina))?|CLABE|CBU|CVU|cta\.?)[\t :#]*(?:(?:No\.?|Nro\.?|número|interbancaria)[\t ]*)?[\d][\d .\-/]{5,25}\d\b/gi },
+      { re: /\b\d{18}\b/g, validate: 'MX_CLABE', requireValid: true },
+      { re: /\b\d{22}\b/g, validate: 'AR_CBU', requireValid: true },
+      // Alias CBU (Argentina): tres palabras separadas por punto, con contexto
+      { re: /\balias(?:[\t ]+CBU)?[\t :]+[a-z0-9]+(?:\.[a-z0-9]+){1,3}\b/gi },
     ]
   },
   {
     id: 'ip',
-    label: 'Direcciones IP',
-    ex: '192.168.1.105',
-    color: '#92400e', bg: '#fffbeb', border: '#fde68a', tag: 'IP',
+    label: 'Direcciones IP y MAC',
+    ex: '192.168.1.105 · fe80::1 · 00:1A:2B:3C:4D:5E',
+    color: '#92400e', bg: '#fffbeb', border: '#fde68a', tag: 'IP', icon: '🖧',
     on: true,
     pats: [
       /\b(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
+      /\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|\b(?:[0-9a-f]{1,4}:){1,7}:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?\b/gi,
+      /\b(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}\b/gi,
     ]
   },
   {
     id: 'fiscal',
-    label: 'IDs fiscales (LATAM + USA)',
-    ex: 'RFC, CUIT, RUC, NIT, RUT, SSN, EIN, CURP, RIF…',
-    color: '#9f1239', bg: '#fff1f2', border: '#fecdd3', tag: 'ID_FISCAL',
+    label: 'Identificación personal y fiscal (Hispanoamérica + USA)',
+    ex: 'Cédula, DNI, CURP, RFC, RUT, CUIT, NIT, RUC, DUI, DPI, RNC, SSN, pasaporte…',
+    color: '#9f1239', bg: '#fff1f2', border: '#fecdd3', tag: 'ID_FISCAL', icon: '🪪',
     on: true,
     pats: [
-      // México — RFC persona (AAAA######XXX) y empresa (AAA######XXX)
-      /\b[A-ZÁÉÍÓÚÑ&]{3,4}\d{6}[A-Z0-9]{3}\b/gi,
-      // México — CURP (18 chars: AAAA######HMMMXXX##)
-      /\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z\d]\d\b/gi,
-      // Argentina — CUIT/CUIL: XX-XXXXXXXX-X
-      /\b\d{2}-\d{7,8}-\d\b/g,
-      // Chile — RUT: XX.XXX.XXX-X
-      /\b\d{1,2}\.\d{3}\.\d{3}-[\dkK]\b/gi,
-      // Colombia — NIT: XXX.XXX.XXX-X
-      /\b\d{3}\.\d{3}\.\d{3}-\d\b/g,
-      // Venezuela — RIF: J-XXXXXXXX-X / V-XXXXXXXX-X
-      /\b[JVEGPC]-\d{8}-\d\b/gi,
-      // El Salvador — NIT: XXXX-XXXXXX-XXX-X
-      /\b\d{4}-\d{6}-\d{3}-\d\b/g,
-      // República Dominicana — RNC: XXX-XXXXX-X
-      /\b\d{3}-\d{5}-\d\b/g,
-      // EE.UU. — SSN: XXX-XX-XXXX
-      /\b\d{3}-\d{2}-\d{4}\b/g,
-      // EE.UU. — EIN/FEIN/Tax ID: XX-XXXXXXX (solo en contexto fiscal)
-      /\b(?:EIN|FEIN|Tax\s?ID|Federal\s?ID)[\s:#]*\d{2}-\d{7}\b/gi,
-      // Genérico — palabra clave fiscal + número (cubre RUC, CPF, CNPJ, NIT, RTN, DNI, CI, TIN, ITIN)
-      /\b(?:RUC|CPF|CNPJ|NIT|RTN|ITIN|TIN|SSN|EIN|CUIT|CUIL|CURP|RIF|RFC|DNI|CI|RUT|RNC)[\s:#]*[\d\.\-\/]{6,18}\b/gi,
-      /\b(?:C\.?C\.?|c[eé]dula(?: de (?:ciudadan[ií]a|identidad))?)[\t :#]*\d[\d.\-]{4,17}\d\b/gi,
+      // México — CURP (18) y RFC (12-13); siempre en mayúsculas en documentos
+      { re: /\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z\d]\d\b/g, validate: 'MX_CURP' },
+      { re: /\b[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}\b/g, validate: 'MX_RFC', requireValid: true },
+      // Argentina — CUIT/CUIL: XX-XXXXXXXX-X o 11 dígitos con verificador
+      { re: /\b\d{2}-\d{7,8}-\d\b/g, validate: 'AR_CUIT' },
+      { re: /\b(?:20|23|24|27|30|33|34)\d{9}\b/g, validate: 'AR_CUIT', requireValid: true },
+      // Chile — RUT con o sin puntos
+      { re: /\b\d{1,2}\.\d{3}\.\d{3}-[\dkK]\b/g, validate: 'CL_RUT' },
+      { re: /\b\d{7,8}-[\dkK]\b/g, validate: 'CL_RUT', requireValid: true },
+      // Colombia — NIT con puntos; NIT/CC sin puntos con verificador
+      { re: /\b\d{3}\.\d{3}\.\d{3}-\d\b/g, validate: 'CO_NIT' },
+      { re: /\b[89]\d{8}\d\b/g, validate: 'CO_NIT', requireValid: true },
+      // Ecuador — cédula (10) y RUC (13) con verificador
+      { re: /\b\d{10}001\b/g, validate: 'EC_RUC', requireValid: true },
+      { re: /\b\d{10}\b/g, validate: 'EC_CEDULA', requireValid: true },
+      // Perú — RUC (11) con verificador
+      { re: /\b(?:10|15|16|17|20)\d{9}\b/g, validate: 'PE_RUC', requireValid: true },
+      // Uruguay — CI X.XXX.XXX-X
+      { re: /\b\d\.\d{3}\.\d{3}-\d\b/g, validate: 'UY_CI' },
+      // El Salvador — DUI XXXXXXXX-X y NIT XXXX-XXXXXX-XXX-X
+      { re: /\b\d{8}-\d\b/g, validate: 'SV_DUI', requireValid: true },
+      { re: /\b\d{4}-\d{6}-\d{3}-\d\b/g },
+      // Brasil — CPF y CNPJ (se conservan)
+      { re: /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, validate: 'BR_CPF' },
+      { re: /\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g, validate: 'BR_CNPJ' },
+      // Venezuela — CI V-12.345.678 / RIF J-30123456-7
+      { re: /\b[VEJGPC]-?\d{1,2}\.\d{3}\.\d{3}\b/gi },
+      { re: /\b[JVEGPC]-\d{8}-\d\b/gi },
+      // Panamá — cédula 8-123-4567, PE-12-345, E-8-12345, N-12-345
+      { re: /\b(?:PE|E|N|\d{1,2}(?:AV|PI)?)-\d{1,4}-\d{1,6}\b/g },
+      // Costa Rica — cédula física 1-1234-5678 y jurídica 3-101-123456
+      { re: /\b[1-9]-\d{4}-\d{4}\b/g },
+      { re: /\b[1-9]-\d{3}-\d{6}\b/g },
+      // Honduras — identidad 0801-1990-12345 ; RTN 0801-1990-123456
+      { re: /\b\d{4}-\d{4}-\d{5,6}\b/g },
+      // Nicaragua — cédula 001-010190-0001A
+      { re: /\b\d{3}-\d{6}-\d{4}[A-Z]\b/g },
+      // Guatemala — DPI/CUI 1234 56789 0101 ; NIT 1234567-8
+      { re: /\b\d{4}[\s]\d{5}[\s]\d{4}\b/g },
+      // República Dominicana — cédula 001-1234567-8 y RNC 1-01-12345-6 / 101-12345-6
+      { re: /\b\d{3}-\d{7}-\d\b/g },
+      { re: /\b\d-\d{2}-\d{5}-\d\b/g },
+      { re: /\b\d{3}-\d{5}-\d\b/g },
+      // Argentina/Colombia — DNI/CC 12.345.678 sin contexto: nunca precedido de moneda ni seguido de moneda o «/año»
+      { re: /(?<![$€£¥]\s?)(?<![\d.,])(?<!(?:impresiones|visitas|vistas|clics|clicks|alcance|seguidores|usuarios|unidades|habitantes|poblaci[oó]n|cantidad|total|monto|valor|importe|saldo|precio|presupuesto|ingresos|ventas|costo|coste|inversi[oó]n|capital|deuda|cr[eé]dito|l[ií]mite)[\t :]*)\d{1,2}\.\d{3}\.\d{3}(?![\d.,]|\s?(?:USD|MXN|COP|ARS|CLP|PEN|BOB|PYG|UYU|VES|GTQ|HNL|NIO|CRC|PAB|DOP|EUR|d[oó]lares|pesos|soles|bol[ií]vares|guaran[ií]es|quetzales|lempiras|c[oó]rdobas|colones|balboas|euros|unidades|u\.)|\/)/gi },
+      // EE.UU. — SSN XXX-XX-XXXX (sin áreas inválidas) y EIN con contexto
+      { re: /\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g },
+      { re: /\b(?:EIN|FEIN|Tax\s?ID|Federal\s?ID)[\s:#]*\d{2}-\d{7}\b/gi },
+      // Pasaporte con contexto
+      { re: /\b(?:pasaporte|passport)(?:[\t ]+(?:No\.?|Nro\.?|N°|número|number))?[\t :#]*[A-Z]{1,3}\d{6,9}\b/gi },
+      // Genérico — palabra clave + número (RUC, CPF, CNPJ, NIT, RTN, DNI, CI, CE, DUI, DPI, CUI, NSS, TIN…), con extensión departamental boliviana opcional
+      { re: /(?<![\p{L}])(?:RUC|CPF|CNPJ|NIT|RTN|ITIN|TIN|SSN|EIN|CUIT|CUIL|CURP|RIF|RFC|DNI|C\.?I\.?|CIP|C\.?E\.?|RUT|RNC|DUI|DPI|CUI|NSS|NUI|NIE|NIF|C\.?C\.?|T\.?I\.?|CUIP|c[eé]dula(?: de (?:ciudadan[ií]a|identidad|extranjer[ií]a))?|identificad[oa] (?:con|bajo)|identificaci[oó]n|documento(?: de identidad)?|carn[eé]t?(?: de extranjer[ií]a)?)(?:[\t ]+(?:No\.?|Nro\.?|N°|Núm\.?|número|el n[uú]mero))?[\t :#.]*[A-Z]{0,2}[\d][\d.\-\/ ]{4,20}\d(?:[\t ]+(?:LP|CB|SC|OR|PT|TJ|CH|BE|PD))?\b/giu },
     ]
   },
   {
     id: 'phone',
     label: 'Teléfonos',
-    ex: '+52 55 1234 5678',
-    color: '#4338ca', bg: '#eef2ff', border: '#c7d2fe', tag: 'TELEFONO',
+    ex: '+52 55 1234 5678 · 0991234567 · 310 456 7890',
+    color: '#4338ca', bg: '#eef2ff', border: '#c7d2fe', tag: 'TELEFONO', icon: '📞',
     on: true,
     pats: [
       /\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}\b/g,
       /\(\d{2,4}\)[\s\-]?\d{3,4}[\s\-]?\d{3,4}\b/g,
+      // Con contexto: Tel, Cel, Móvil, WhatsApp, llamar al, fijo, celular… + 7-11 dígitos con separadores
+      /\b(?:tel[eé]fono|tel\.?|cel\.?|celular|m[oó]vil|whatsapp|wsp|wa|fijo|llamar(?: al)?|ll[aá]mame al|contactar al|n[uú]mero|phone|mobile|call)[\t :.#]*(?:\d[\d\s\-.]{6,13}\d)\b/gi,
+      // Sin contexto: celular local de 10 dígitos que empieza por 0 o 3 (EC, CO, CR, SV, HN, PA…), agrupado o no
+      /(?<![\d.\-])(?:0\d{9}|3\d{9}|0\d{2}[\s\-]\d{3}[\s\-]\d{4}|3\d{2}[\s\-]\d{3}[\s\-]\d{4})(?![\d.\-])/g,
+      // Sin contexto: MX/AR/CL/PE/UY con agrupación nacional
+      /(?<![\d.\-])(?:\d{2}[\s]\d{4}[\s\-]\d{4}|9[\s]\d{4}[\s]\d{4}|\d{3}[\s]\d{3}[\s]\d{3}|\d{4}-\d{4})(?![\d.\-])/g,
     ]
   },
   {
     id: 'money',
-    label: 'Montos exactos → rangos ~±10%',
-    ex: '$85.340 → $~76.806–$93.874',
-    color: '#b45309', bg: '#fffbeb', border: '#fcd34d', tag: 'MONTO',
+    label: 'Montos exactos (todas las monedas)',
+    ex: '$85.340 · USD 45,000.00 · S/ 3,500 · COP 4.200.000',
+    color: '#b45309', bg: '#fffbeb', border: '#fcd34d', tag: 'MONTO', icon: '💰',
     on: false,
     pats: [
-      /\$\s?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)\b/g,
+      new RegExp(CURRENCY_PREFIX + '\\s?(' + NUMBER + ')(?![\\d.,])', 'g'),
+      new RegExp('(?<![\\d.,])(' + NUMBER + ')\\s?' + CURRENCY_SUFFIX + '\\b', 'gi'),
+    ]
+  },
+  {
+    id: 'birthdate',
+    label: 'Fecha de nacimiento y edad',
+    ex: 'Nacimiento: 7 de septiembre de 1985 · Edad: 38 años',
+    color: '#9d174d', bg: '#fdf2f8', border: '#f9a8d4', tag: 'NACIMIENTO', icon: '🎂',
+    on: true,
+    pats: [
+      /\b(?:fecha de nacimiento|nacimiento|nacid[oa] (?:el|en)|naci[oó] el|F\.? ?Nac\.?|DOB|date of birth|born on)[\t :.]*(?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}(?: de)? (?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?: de)? \d{4})/gi,
+      /\b(?:edad|age)[\t :.]*\d{1,3}(?:[\t ]+(?:años|year)s?)?\b/gi,
+      /\b\d{1,3}[\t ]+años(?:[\t ]+de[\t ]+edad)?\b/gi,
     ]
   },
   {
     id: 'address',
     label: 'Direcciones físicas (heurístico)',
     ex: 'Av. República #123, Calle Bolívar 45',
-    color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', tag: 'DIRECCION',
+    color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', tag: 'DIRECCION', icon: '📍',
     on: false,
     pats: [
-      /\b(?:Av\.?|Avenida|Calle|Cl\.|Carrera|Cra\.|Pasaje|Pje\.|Jirón|Jr\.|Boulevard|Blvd\.?)\s+[^\n,.;]{2,35}(?:(?:#|Nro\.?|No\.?|N°|número)\s?\d{1,6})?\b/gi,
+      /\b(?:Av\.?|Avenida|Calle|Cl\.|Cll\.?|Carrera|Cra\.|Kr\.?|Pasaje|Pje\.|Jirón|Jr\.|Boulevard|Blvd\.?|Diagonal|Dg\.?|Transversal|Tv\.?|Camino|Paseo|Ruta|Km\.?|Kilómetro|Colonia|Col\.|Fraccionamiento|Fracc\.|Urbanización|Urb\.|Barrio|Bo\.|Residencial|Res\.|Sector|Mz\.?|Manzana|Lote|Lt\.?|Casa|Depto\.?|Departamento|Apto\.?|Apartamento|Piso|Oficina|Of\.|Local)\s+[^\n,.;]{2,35}(?:(?:#|Nro\.?|No\.?|N°|número)\s?\d{1,6})?\b/gi,
     ]
   },
   {
     id: 'company',
     label: 'Nombres de empresa (heurístico)',
-    ex: 'Acme S.A., XYZ Corp.',
-    color: '#0f766e', bg: '#f0fdfa', border: '#99f6e4', tag: 'EMPRESA',
+    ex: 'Acme S.A., XYZ Corp., Andina S.A.S.',
+    color: '#0f766e', bg: '#f0fdfa', border: '#99f6e4', tag: 'EMPRESA', icon: '🏢',
     on: false,
     pats: [
-      /\b[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ]+(?: [A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ]+)* (?:S\.A\.|S\.A\.S\.|S\.R\.L\.|S\.L\.|Corp\.|LLC|Ltd\.|Inc\.|GmbH|SpA|E\.I\.R\.L\.)\b/g,
+      /\b[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ&]+(?: (?:de |del |la |y |e |& )?[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ&]+)*,? (?:S\.?A\.?S?\.?|S\.?R\.?L\.?|S\.?L\.?|S\.?A\.? de C\.?V\.?|S\. de R\.?L\.?|C\.?A\.?|Ltda\.?|Cía\.? Ltda\.?|Corp\.?|LLC|Ltd\.?|Inc\.?|GmbH|SpA|E\.?I\.?R\.?L\.?|S\.?A\.?C\.?|S\.?C\.?|B\.?V\.?|Co\.?)(?![\p{L}])/gu,
     ]
   },
   {
     id: 'date',
     label: 'Fechas específicas (heurístico)',
-    ex: '15/03/2024, marzo de 2024',
-    color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd', tag: 'FECHA',
+    ex: '15/03/2024 · 15 de marzo de 2024 · 2024-03-15',
+    color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd', tag: 'FECHA', icon: '📅',
     on: false,
     pats: [
-      /\b(?:0?[1-9]|[12]\d|3[01])[\/\-](?:0?[1-9]|1[0-2])[\/\-](?:19|20)\d{2}\b/g,
-      /\b(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre) (?:de )?\d{4}\b/gi,
+      /\b(?:0?[1-9]|[12]\d|3[01])[\/\-.](?:0?[1-9]|1[0-2])[\/\-.](?:(?:19|20)\d{2}|\d{2})\b/g,
+      /\b(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b/g,
+      /\b(?:0?[1-9]|[12]\d|3[01])(?: de)?[\t ]+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?: de)?[\t ]+(?:19|20)\d{2}\b/gi,
+      /\b(?:0?[1-9]|[12]\d|3[01])-(?:ene|feb|mar|abr|may|jun|jul|ago|sep|set|oct|nov|dic)-(?:(?:19|20)\d{2}|\d{2})\b/gi,
+      /\b(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre) (?:de )?\d{4}\b/gi,
     ]
   },
 ];
 
 // ─── Categoría de términos personalizados ────────────────────────────────────
 const CUSTOM_CAT = {
-  id: 'custom', label: 'Término personalizado', tag: 'PERSONALIZADO',
+  id: 'custom', label: 'Término personalizado', tag: 'PERSONALIZADO', icon: '✏️',
   color: '#374151', bg: '#f9fafb', border: '#d1d5db',
 };
 
+// ─── Utilidades del motor ─────────────────────────────────────────────────────
+function patternOf(p) { return p instanceof RegExp ? { re: p } : p; }
+function normalizeEntity(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+function parseTermList(text) {
+  return [...new Set(String(text || '').split('\n').map(t => t.trim()).filter(t => t.length >= 2))];
+}
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function buildWhitelistRanges(source, whitelist) {
+  const ranges = [];
+  for (const term of parseTermList(whitelist)) {
+    const re = new RegExp(escapeRegExp(term), 'gi');
+    for (const m of source.matchAll(re)) ranges.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return ranges.sort((a, b) => a.start - b.start);
+}
+function overlapsRange(ranges, start, end) {
+  return ranges.some(r => start < r.end && end > r.start);
+}
+
 // ─── Lógica de anonimización ──────────────────────────────────────────────────
-function runAnonymize(text, activeCats, customTerms) {
+function runAnonymize(text, activeCats, customTerms, options = {}) {
   const source = String(text || '');
   const reps = [], candidates = [], selected = [];
   const protectedTags = [...source.matchAll(/\[[A-Z_]+_\d+\]/g)].map(m => ({ start: m.index, end: m.index + m[0].length }));
   const usedTags = new Set(source.match(/\[[A-Z_]+_\d+\]/g) || []);
+  const whitelistRanges = buildWhitelistRanges(source, options.whitelist);
   const collect = (pat, cat, priority, capture = 0) => {
-    pat.lastIndex = 0;
-    for (const match of source.matchAll(pat)) {
+    const { re, validate, requireValid } = patternOf(pat);
+    re.lastIndex = 0;
+    for (const match of source.matchAll(re)) {
       let start = match.index;
       const end = start + match[capture].length;
       if (end <= start) continue;
+      const value = match[capture];
+      let valid = null;
+      if (validate) {
+        valid = VALIDATORS[validate](value);
+        if (requireValid && !valid) continue;
+      }
+      if (whitelistRanges.length && overlapsRange(whitelistRanges, start, end)) continue;
       // Buscar la primera etiqueta que puede cruzarse; conservar los extremos sensibles.
       let lo = 0, hi = protectedTags.length;
       while (lo < hi) {
@@ -238,7 +392,7 @@ function runAnonymize(text, activeCats, customTerms) {
         if (protectedTags[mid].end <= start) lo = mid + 1; else hi = mid;
       }
       const add = (from, to) => {
-        if (from < to) candidates.push({ start: from, end: to, cat, priority, length: to - from });
+        if (from < to) candidates.push({ start: from, end: to, cat, priority: valid === true ? priority - 0.5 : priority, length: to - from, valid });
       };
       for (let i = lo; i < protectedTags.length && protectedTags[i].start < end; i++) {
         add(start, protectedTags[i].start);
@@ -249,13 +403,11 @@ function runAnonymize(text, activeCats, customTerms) {
   };
   for (const cat of activeCats) {
     const pats = cat.id === 'person' ? getPersonPatterns(source) : cat.pats;
-    for (const pat of pats) collect(pat, cat, ['credentials', 'email', 'url', 'financial', 'ip', 'fiscal', 'phone'].includes(cat.id) ? 0 : 2);
+    for (const pat of pats) collect(pat, cat, ['credentials', 'email', 'url', 'financial', 'ip', 'fiscal', 'phone', 'birthdate'].includes(cat.id) ? 0 : 2);
   }
-  const terms = [...new Set(String(customTerms || '').split('\n').map(t => t.trim()).filter(t => t.length >= 2))];
-  for (const term of terms) {
-    const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const term of parseTermList(customTerms)) {
     // Lookahead con captura: enumera también ocurrencias solapadas del mismo término.
-    collect(new RegExp('(?=(' + esc + '))', 'gi'), CUSTOM_CAT, 1, 1);
+    collect(new RegExp('(?=(' + escapeRegExp(term) + '))', 'gi'), CUSTOM_CAT, 1, 1);
   }
   // Unión por posición: ninguna coincidencia parcial puede dejar un sufijo sensible.
   candidates.sort((a, b) => a.start - b.start || b.length - a.length || a.priority - b.priority);
@@ -266,19 +418,26 @@ function runAnonymize(text, activeCats, customTerms) {
     // Un término explícito manda en la unión; los correos siempre se cubren completos.
     if (item.cat.id === 'custom' || (last.cat.id !== 'custom' &&
         (item.priority < last.priority || (item.priority === last.priority && item.length > last.length)))) {
-      last.cat = item.cat; last.priority = item.priority; last.length = item.length;
+      last.cat = item.cat; last.priority = item.priority; last.length = item.length; last.valid = item.valid;
     }
   }
-  const counters = {};
+  // Misma entidad (categoría + original normalizado) → misma etiqueta en todo el texto.
+  const counters = {}, entityTags = new Map(), repByTag = new Map();
   let cursor = 0, out = '';
   for (const item of selected) {
     const cat = item.cat;
     const original = source.slice(item.start, item.end);
-    let tag;
-    do { counters[cat.id] = (counters[cat.id] || 0) + 1; tag = '[' + cat.tag + '_' + counters[cat.id] + ']'; } while (usedTags.has(tag));
-    usedTags.add(tag);
-    const hint = cat.id === 'money' ? formatMoneyRange(original.replace(/[$\s]/g, '')) : null;
-    reps.push({ original, replacement: tag, catId: cat.id, catLabel: cat.label, hint });
+    const key = cat.id + '\u0000' + normalizeEntity(original);
+    let tag = entityTags.get(key);
+    if (!tag) {
+      do { counters[cat.id] = (counters[cat.id] || 0) + 1; tag = '[' + cat.tag + '_' + counters[cat.id] + ']'; } while (usedTags.has(tag));
+      usedTags.add(tag);
+      entityTags.set(key, tag);
+      const hint = cat.id === 'money' ? formatMoneyRange(original.replace(/[^\d.,]/g, '')) : null;
+      const rep = { original, replacement: tag, catId: cat.id, catLabel: cat.label, hint, valid: item.valid === undefined ? null : item.valid, count: 0 };
+      reps.push(rep); repByTag.set(tag, rep);
+    }
+    repByTag.get(tag).count += 1;
     out += source.slice(cursor, item.start) + tag;
     cursor = item.end;
   }
@@ -286,22 +445,63 @@ function runAnonymize(text, activeCats, customTerms) {
 }
 
 // ─── Revisión residual: usa los mismos patrones que el motor ───────────────────
-function computeResidualRisk(text) {
-  const hits = [];
+// activeIds (opcional): solo las categorías activas bloquean; las inactivas se listan como avisos.
+function computeResidualRisk(text, activeIds = null, options = {}) {
+  const hits = [], warnings = [];
   // Las etiquetas ya presentes no son datos originales ni se vuelven a escanear.
-  const plain = String(text || '').replace(/\[[A-Z_]+_\d+\]/g, '');
+  let plain = String(text || '').replace(/\[[A-Z_]+_\d+\]/g, '');
+  for (const term of parseTermList(options.whitelist)) plain = plain.split(term).join('');
   for (const cat of CATS) {
     const patterns = cat.id === 'person' ? getPersonPatterns(plain) : cat.pats;
-    if (patterns.some(pat => { pat.lastIndex = 0; return pat.test(plain); })) hits.push(cat.label);
+    const found = patterns.some(p => {
+      const { re, validate, requireValid } = patternOf(p);
+      re.lastIndex = 0;
+      for (const m of plain.matchAll(re)) {
+        if (requireValid && !VALIDATORS[validate](m[0])) continue;
+        return true;
+      }
+      return false;
+    });
+    if (!found) continue;
+    if (activeIds && !activeIds.includes(cat.id)) warnings.push(cat.label); else hits.push(cat.label);
   }
   // score se conserva como contador para compatibilidad interna; NO es porcentaje.
-  return { score: hits.length, hits };
+  return { score: hits.length, hits, warnings };
 }
 
 function getRiskInfo(score, reviewed = false) {
   if (score > 0) return { label: 'Datos detectables pendientes', emoji: '🔴', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
   if (reviewed) return { label: 'Revisión manual confirmada', emoji: '🟡', color: '#92400e', bg: '#fffbeb', border: '#fcd34d' };
-  return { label: 'Revisar antes de usar', emoji: '🟡', color: '#d97706', bg: '#fffbeb', border: '#fcd34d' };
+  return { label: 'Revisar antes de usar', emoji: '🟡', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' };
+}
+
+// ─── Recuperación tolerante: repara etiquetas deformadas por el LLM ───────────
+const TAG_ALIASES = { PERSON: 'PERSONA', NAME: 'PERSONA', CREDENTIAL: 'CREDENCIAL', PHONE: 'TELEFONO', TELEPHONE: 'TELEFONO', ACCOUNT: 'CUENTA', TAX_ID: 'ID_FISCAL', TAXID: 'ID_FISCAL', FISCAL_ID: 'ID_FISCAL', ID: 'ID_FISCAL', AMOUNT: 'MONTO', MONEY: 'MONTO', ADDRESS: 'DIRECCION', COMPANY: 'EMPRESA', DATE: 'FECHA', BIRTHDATE: 'NACIMIENTO', BIRTH: 'NACIMIENTO', CUSTOM: 'PERSONALIZADO', MAIL: 'EMAIL', CORREO: 'EMAIL', TELÉFONO: 'TELEFONO', DIRECCIÓN: 'DIRECCION' };
+function canonicalTag(kind, num) {
+  let k = String(kind).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s\-]+/g, '_');
+  k = TAG_ALIASES[k] || k;
+  return '[' + k + '_' + String(+num) + ']';
+}
+function restoreTags(text, mapping) {
+  const source = String(text || '');
+  const resolved = [], unresolved = new Set(), repaired = [];
+  const seen = new Set();
+  // 1) Etiquetas exactas. 2) Variantes: espacios/guiones, minúsculas, sin corchetes, alias en inglés, espacios internos.
+  // Sin corchetes solo se acepta un tipo conocido (en cualquier caja), para no tocar identificadores normales como foo_1.
+  const knownKinds = [...new Set([...Object.keys(TAG_ALIASES), ...Object.values(TAG_ALIASES), 'PERSONA', 'EMAIL', 'URL', 'IP', 'CREDENCIAL', 'CUENTA', 'ID_FISCAL', 'TELEFONO', 'MONTO', 'NACIMIENTO', 'DIRECCION', 'EMPRESA', 'FECHA', 'PERSONALIZADO'])].sort((a, b) => b.length - a.length).join('|');
+  const loose = new RegExp('\\[\\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ_\\s\\-]*?)[\\s_\\-]+(\\d+)\\s*\\]|(?<![\\p{L}\\p{N}_\\[])(' + knownKinds + ')_(\\d+)(?![\\p{L}\\p{N}_\\]])', 'giu');
+  const out = source.replace(loose, (whole, kindA, numA, kindB, numB) => {
+    const kind = kindA ?? kindB, num = numA ?? numB;
+    const canonical = canonicalTag(kind.trim(), num);
+    if (mapping[canonical] === undefined) {
+      if (/^\[[A-Z_]+_\d+\]$/.test(whole)) unresolved.add(whole);
+      return whole; // «[anexo 1]» o etiquetas ajenas se dejan intactas
+    }
+    if (!seen.has(canonical)) { seen.add(canonical); resolved.push({ tag: canonical, value: mapping[canonical] }); }
+    if (whole !== canonical) repaired.push({ found: whole, tag: canonical });
+    return mapping[canonical];
+  });
+  return { out, resolved, unresolved: [...unresolved], repaired };
 }
 
 // ─── Mapas TSV: JSON solo cuando el encabezado lo declara ─────────────────────
@@ -370,10 +570,10 @@ Director de Tecnología — Sistemas Integrados del Norte S.A.
 
 // ─── Componentes UI base ──────────────────────────────────────────────────────
 function AppButton({ children, onClick, variant = "primary", className = "", type = "button", disabled = false }) {
-  const base = "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 disabled:opacity-50 disabled:cursor-not-allowed";
+  const base = "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
   const styles = variant === "primary"
     ? "bg-[#b00020] text-white hover:bg-[#8c001a]"
-    : "border border-[#e5e5e5] bg-white text-[#333333] hover:bg-[#fff5f6]";
+    : "border border-[#9a9a9a] bg-white text-[#333333] hover:bg-[#fff5f6]";
   return (
     <button type={type} onClick={onClick} disabled={disabled} className={cn(base, styles, className)}>
       {children}
@@ -381,40 +581,134 @@ function AppButton({ children, onClick, variant = "primary", className = "", typ
   );
 }
 
+// ─── Popover anclado: se dibuja en un portal fijo bajo el disparador, nunca sobre el texto del flujo ───
+function AnchoredPopover({ anchorRef, open, onClose, children, role = 'dialog', label, id }) {
+  const [pos, setPos] = useState(null);
+  React.useLayoutEffect(() => {
+    if (!open || !anchorRef.current) { setPos(null); return; }
+    const place = () => {
+      const r = anchorRef.current.getBoundingClientRect();
+      const width = Math.min(320, window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      const below = r.bottom + 6;
+      const fitsBelow = below + 160 < window.innerHeight;
+      setPos({ left, top: fitsBelow ? below : null, bottom: fitsBelow ? null : window.innerHeight - r.top + 6, width });
+    };
+    place();
+    // Al desplazar o redimensionar se cierra: un popover que viaja con el scroll acaba tapando el header.
+    const dismiss = () => onClose();
+    window.addEventListener('scroll', dismiss, true); window.addEventListener('resize', dismiss);
+    const onDoc = e => { if (!anchorRef.current.contains(e.target) && !e.target.closest('[data-popover]')) onClose(); };
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('scroll', dismiss, true); window.removeEventListener('resize', dismiss); document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  if (!open || !pos) return null;
+  return ReactDOM.createPortal(
+    <div data-popover id={id} role={role} aria-label={label}
+      style={{ position: 'fixed', left: pos.left, top: pos.top ?? 'auto', bottom: pos.bottom ?? 'auto', width: pos.width, zIndex: 65 }}
+      className="rounded-xl border border-[#9a9a9a] bg-white p-3 font-sans text-xs font-normal leading-relaxed text-[#222222] shadow-xl whitespace-normal">
+      {children}
+    </div>, document.body);
+}
+
+// Tooltip accesible: funciona con clic/toque, teclado (Enter/Espacio/Esc) y lector de pantalla.
 function InfoIcon({ text }) {
   if (!text) return null;
+  const [open, setOpen] = useState(false);
+  const id = useRef('info-' + Math.random().toString(36).slice(2)).current;
+  const btn = useRef(null);
   return (
-    <span className="group relative inline-flex cursor-help select-none items-center">
-      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[#2A5B8C] text-xs font-bold text-[#2A5B8C]">?</span>
-      <span className="pointer-events-none absolute left-6 top-0 z-30 hidden w-72 rounded-xl border border-[#e5e5e5] bg-white p-3 text-xs font-normal leading-relaxed text-[#333333] shadow-lg group-hover:block">{text}</span>
+    <span className="relative inline-flex items-center">
+      <button ref={btn} type="button" aria-expanded={open} aria-controls={id} aria-label="Más información"
+        onClick={() => setOpen(v => !v)}
+        onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-[#2A5B8C] text-xs font-bold text-[#2A5B8C] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2A5B8C]">?</button>
+      <AnchoredPopover anchorRef={btn} open={open} onClose={() => setOpen(false)} role="tooltip" id={id}>{text}</AnchoredPopover>
     </span>
   );
 }
 
+// ─── Diálogos propios: sustituyen alert/confirm sin bloquear el hilo ni la activación de usuario ───
+const DialogContext = React.createContext(null);
+function DialogProvider({ children }) {
+  const [dialog, setDialog] = useState(null);
+  const [toast, setToast] = useState('');
+  const api = useMemo(() => ({
+    alert: (message, title = 'Aviso') => new Promise(resolve => setDialog({ title, message, buttons: [{ label: 'Entendido', value: true, primary: true }], resolve })),
+    confirm: (message, { title = 'Confirmar', ok = 'Continuar', cancel = 'Cancelar', danger = false } = {}) => new Promise(resolve => setDialog({ title, message, danger, buttons: [{ label: cancel, value: false }, { label: ok, value: true, primary: true }], resolve })),
+    notify: (message) => { setToast(message); setTimeout(() => setToast(''), 2500); },
+  }), []);
+  const close = value => { const d = dialog; setDialog(null); d && d.resolve(value); };
+  const ref = useRef(null);
+  React.useEffect(() => {
+    if (!dialog) return;
+    const prev = document.activeElement;
+    const node = ref.current; node && node.querySelector('button[data-primary]')?.focus();
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
+    document.addEventListener('keydown', onKey, true);
+    return () => { document.removeEventListener('keydown', onKey, true); prev && prev.isConnected && prev.focus(); };
+  }, [dialog]);
+  return (
+    <DialogContext.Provider value={api}>
+      {children}
+      <div role="status" aria-live="polite" className="sr-only">{toast}</div>
+      {toast ? <div className="fixed bottom-4 left-1/2 z-[60] -translate-x-1/2 rounded-2xl bg-[#222222] px-4 py-3 text-sm font-semibold text-white shadow-xl" aria-hidden="true">{toast}</div> : null}
+      {dialog ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={() => close(false)}>
+          <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-msg" onClick={e => e.stopPropagation()}
+            className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl">
+            <h2 id="dlg-title" className="mb-2 text-lg font-bold text-[#222222]">{dialog.title}</h2>
+            <p id="dlg-msg" className="whitespace-pre-wrap text-sm leading-relaxed text-[#333333]">{dialog.message}</p>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              {dialog.buttons.map(b => (
+                <AppButton key={b.label} variant={b.primary ? 'primary' : 'secondary'} onClick={() => close(b.value)} className={b.primary && dialog.danger ? 'bg-[#dc2626] hover:bg-[#b91c1c]' : ''}>
+                  <span data-primary={b.primary || undefined}>{b.label}</span>
+                </AppButton>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </DialogContext.Provider>
+  );
+}
+function useDialog() { return React.useContext(DialogContext); }
+
+// ─── Estado de anuncio para lectores de pantalla ─────────────────────────────
+function LiveStatus({ message }) {
+  return <div role="status" aria-live="polite" className="sr-only">{message}</div>;
+}
+
 // ─── Semáforo de riesgo residual ──────────────────────────────────────────────
-function RiskSemaphore({ text, reviewed, onReview }) {
-  const { score, hits } = useMemo(() => computeResidualRisk(text), [text]);
+function RiskSemaphore({ text, reviewed, onReview, activeIds, whitelist, riskData }) {
+  const computed = useMemo(() => riskData || computeResidualRisk(text, activeIds || null, { whitelist }), [text, riskData, activeIds && activeIds.join(','), whitelist]);
+  const { score, hits, warnings = [] } = computed;
   const info = getRiskInfo(score, reviewed);
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4"
-      style={{ backgroundColor: info.bg, borderColor: info.border }}>
-      <span className="text-2xl">{info.emoji}</span>
+      style={{ backgroundColor: info.bg, borderColor: info.border }} role="region" aria-label="Estado de revisión">
+      <span className="text-2xl" aria-hidden="true">{info.emoji}</span>
       <div>
-        <div className="font-bold text-sm" style={{ color: info.color }}>{info.label}</div>
+        <div className="font-bold text-sm" style={{ color: info.color }} role={score > 0 ? 'alert' : undefined}>{info.label}</div>
         {hits.length > 0 ? (
           <div className="text-xs mt-0.5" style={{ color: info.color }}>
-            Patrones detectados aún presentes: {hits.join(', ')} — activa esas categorías o revisa manualmente.
+            Datos de categorías activas aún presentes: {hits.join(', ')}. Añádelos a Términos personalizados, retíralos del texto o márcalos en la lista blanca si no identifican a nadie.
           </div>
         ) : (
-          <div className="text-xs mt-0.5 text-[#92400e]">Sin coincidencias en los patrones comprobados. Esto no demuestra que el texto esté anonimizado por completo.</div>
+          <div className="text-xs mt-0.5 text-[#92400e]">Sin coincidencias en las categorías activas. Esto no demuestra que el texto esté seudonimizado por completo.</div>
         )}
+        {warnings.length > 0 ? (
+          <div className="text-xs mt-1 text-[#92400e]">Aviso: hay posibles {warnings.join(', ').toLowerCase()} en categorías desactivadas. Actívalas si pueden identificar a alguien.</div>
+        ) : null}
       </div>
-      <p className="w-full text-xs text-[#92400e]">Revisa nombres sin contexto, apodos, empresas, direcciones, cifras y detalles que identifiquen a alguien. Añádelos a Términos personalizados y vuelve a procesar. No calculamos una probabilidad de riesgo.</p>
+      <p className="w-full text-xs text-[#92400e]">Lista rápida: ¿queda algún nombre o apodo? ¿una cifra, cargo o lugar que identifique a alguien? ¿un dato de salud, familia o sindicato? Añádelos a Términos personalizados y vuelve a procesar. No calculamos una probabilidad de riesgo.</p>
       <label className="flex w-full items-start gap-2 text-sm text-[#333333]">
-        <input type="checkbox" data-review checked={!!reviewed} disabled={hits.length > 0}
-          onChange={e => onReview && onReview(e.target.checked)} className="mt-1" />
-        He revisado el resultado y retirado los datos que no debo compartir. Esta confirmación no certifica anonimización completa.
+        <input type="checkbox" data-review checked={!!reviewed} disabled={hits.length > 0} aria-describedby="review-help"
+          onChange={e => onReview && onReview(e.target.checked)} className="mt-1 h-5 w-5 shrink-0" />
+        <span id="review-help">He revisado el resultado y retirado los datos que no debo compartir. Esta confirmación no certifica una seudonimización completa.{hits.length > 0 ? ' Se habilita cuando no queden datos pendientes de categorías activas.' : ''}</span>
       </label>
     </div>
   );
@@ -422,33 +716,38 @@ function RiskSemaphore({ text, reviewed, onReview }) {
 
 // ─── Modal Acerca de ──────────────────────────────────────────────────────────
 function AboutModal({ open, onClose }) {
+  const ref = useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement;
+    ref.current && ref.current.focus();
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+    document.addEventListener('keydown', onKey, true);
+    return () => { document.removeEventListener('keydown', onKey, true); prev && prev.isConnected && prev.focus(); };
+  }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true">
-      <div className="max-w-2xl w-full rounded-[28px] bg-white p-7 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-labelledby="about-title" onClick={onClose}>
+      <div ref={ref} tabIndex={-1} className="max-w-2xl w-full rounded-[28px] bg-white p-7 shadow-2xl outline-none" onClick={e => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-[#b00020]">FuturIA</p>
-            <h2 className="text-2xl font-bold text-[#222222]">Aplicaciones prácticas para tomar mejores decisiones con IA</h2>
+            <h2 id="about-title" className="text-2xl font-bold text-[#222222]">Anonimizador IA — gratuito y local</h2>
           </div>
-          <button onClick={onClose} className="rounded-full border border-[#e5e5e5] px-3 py-1.5 text-[#757575] hover:bg-[#fff5f6]" aria-label="Cerrar">×</button>
+          <button onClick={onClose} className="min-h-[44px] min-w-[44px] rounded-full border border-[#9a9a9a] px-3 py-1.5 text-[#6b6b6b] hover:bg-[#fff5f6]" aria-label="Cerrar">×</button>
         </div>
         <p className="mb-4 leading-relaxed text-[#333333]">
-          El Anonimizador IA detecta y reemplaza datos sensibles en tus documentos antes de compartirlos con modelos de IA.
-          Todo el procesamiento ocurre en tu navegador — ningún texto viaja a ningún servidor.
+          Herramienta gratuita de FuturIA para equipos de empresa en Hispanoamérica: sustituye datos sensibles por etiquetas reversibles antes de pegar información del negocio en ChatGPT, Claude, Gemini u otro modelo.
+          Todo el procesamiento ocurre en tu navegador — ningún texto viaja a ningún servidor. Sin cuenta, sin pago, sin historial.
         </p>
         <div className="mb-4 rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 text-sm text-[#333333]">
-          <strong>Sin historial automático:</strong> el contenido y el mapa se mantienen en memoria durante la sesión. La app no los guarda en una base de datos. Las descargas, el portapapeles y las copias que hagas quedan fuera de este control. La carga de librerías necesita internet.
+          <strong>Seudonimización, no anonimización:</strong> el resultado es reversible con la llave de recuperación y sigue siendo información de tu empresa; revísalo antes de compartirlo. <strong>Sin historial automático:</strong> el contenido y la llave viven en memoria durante la sesión. Las descargas, el portapapeles y las copias que hagas quedan fuera de este control. La carga de librerías necesita internet.
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {["+70K suscriptores", "+300K visitas/mes", "+80 países"].map((item) => (
-            <div key={item} className="rounded-2xl border border-[#e5e5e5] bg-[#fff5f6] p-4 text-center font-semibold text-[#222222]">{item}</div>
-          ))}
-        </div>
+        <p className="text-xs text-[#6b6b6b]">Versión {APP_VERSION} · Las plantillas de ejemplo contienen únicamente datos ficticios. Al pegar el resultado en un modelo de IA, aplica la política de datos de ese proveedor y de tu empresa.</p>
         <div className="mt-6 flex justify-end gap-3">
           <AppButton variant="secondary" onClick={onClose}>Cerrar</AppButton>
           <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer">
-            <AppButton>Únete a FuturIA</AppButton>
+            <AppButton variant="secondary">Más de FuturIA →</AppButton>
           </a>
         </div>
       </div>
@@ -456,8 +755,31 @@ function AboutModal({ open, onClose }) {
   );
 }
 
+// Etiqueta del resultado: botón + popover anclado (fuera del <pre>, para no tapar las líneas siguientes).
+function TagChip({ part, rep, cat, onExclude }) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef(null);
+  return (
+    <span className="inline-block">
+      <button ref={btn} type="button" aria-expanded={open} aria-label={cat.label + ': ' + part + (rep.valid === true ? ', verificado' : rep.valid === false ? ', formato no verificado' : '')}
+        onClick={() => setOpen(v => !v)} onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}
+        className="anon rounded px-1 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-[#222222]"
+        style={{ backgroundColor: cat.bg, color: cat.color, border: '1.5px solid ' + cat.color }}>
+        <span aria-hidden="true">{cat.icon ? cat.icon + ' ' : ''}</span>{part}{rep.valid === true ? <span aria-hidden="true"> ✓</span> : null}
+      </button>
+      <AnchoredPopover anchorRef={btn} open={open} onClose={() => setOpen(false)} label="Dato original">
+        <span className="block text-[#6b6b6b]">{cat.label}{rep.count > 1 ? ' · ' + rep.count + ' apariciones' : ''}{rep.valid === true ? ' · verificador válido' : rep.valid === false ? ' · verificador no válido' : ''}</span>
+        <span className="block break-all font-mono font-semibold">{rep.original}</span>
+        {rep.hint ? <span className="block text-[#6b6b6b]">Pista de rango: {rep.hint}</span> : null}
+        {onExclude ? <button type="button" onClick={() => { setOpen(false); onExclude(rep); }} className="mt-2 min-h-[36px] rounded-lg border border-[#9a9a9a] px-2 py-1 font-semibold hover:bg-[#fff5f6]">No ocultar este dato (lista blanca)</button> : null}
+      </AnchoredPopover>
+    </span>
+  );
+}
+
 // ─── Output con highlights ────────────────────────────────────────────────────
-function HighlightedOutput({ text, reps, cats }) {
+// Cada etiqueta es un botón: toque/Enter muestran el original (no depende de hover ni de title).
+function HighlightedOutput({ text, reps, cats, onExclude }) {
   const catMap = {};
   cats.forEach(c => { catMap[c.id] = c; });
   const repMap = {};
@@ -473,14 +795,7 @@ function HighlightedOutput({ text, reps, cats }) {
         if (rep) {
           const cat = catMap[rep.catId];
           if (!cat) return <span key={i}>{part}</span>;
-          const label = rep.hint ? part + ' (' + rep.hint + ')' : part;
-          return (
-            <mark key={i} className="anon cursor-default"
-              title={'Original: ' + rep.original + (rep.hint ? ' → ' + rep.hint : '')}
-              style={{ backgroundColor: cat.bg, color: cat.color, border: '1px solid ' + cat.border }}>
-              {label}
-            </mark>
-          );
+          return <TagChip key={i} part={part} rep={rep} cat={cat} onExclude={onExclude} />;
         }
         return <span key={i}>{part}</span>;
       })}
@@ -578,13 +893,12 @@ function DocumentBody({ text, reps, cats, showMarks }) {
           if (rep) {
             const cat = catMap[rep.catId];
             if (!cat) return <span key={i}>{part}</span>;
-            const label = rep.hint ? part + ' (' + rep.hint + ')' : part;
-            if (!showMarks) return <span key={i} style={{ fontFamily: 'monospace', fontSize: '0.88em' }}>{label}</span>;
+            if (!showMarks) return <span key={i} style={{ fontFamily: 'monospace', fontSize: '0.88em' }}>{part}</span>;
             return (
               <mark key={i}
-                title={'Original: ' + rep.original + (rep.hint ? ' → ' + rep.hint : '')}
-                style={{ backgroundColor: cat.bg, color: cat.color, border: '1px solid ' + cat.border, borderRadius: '4px', padding: '0 3px', cursor: 'default', fontFamily: 'monospace', fontSize: '0.88em' }}>
-                {label}
+                aria-label={cat.label + ': ' + part}
+                style={{ backgroundColor: cat.bg, color: cat.color, border: '1.5px solid ' + cat.color, borderRadius: '4px', padding: '0 3px', fontFamily: 'monospace', fontSize: '0.88em' }}>
+                <span aria-hidden="true">{cat.icon ? cat.icon + ' ' : ''}</span>{part}
               </mark>
             );
           }
@@ -611,12 +925,14 @@ function escXml(str) {
     .replace(/"/g, '&quot;');
 }
 
-async function copyLocalText(text) {
+// onError se inyecta desde los componentes (diálogo propio); sin él, se informa por consola.
+async function copyLocalText(text, onError) {
   try {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    alert('No se pudo copiar al portapapeles. Comprueba los permisos del navegador o utiliza la descarga correspondiente.');
+    const message = 'No se pudo copiar al portapapeles. Comprueba los permisos del navegador o utiliza la descarga correspondiente.';
+    if (onError) onError(message); else console.warn(message);
     return false;
   }
 }
@@ -680,9 +996,11 @@ function downloadWordDoc(filename, title, bodyHtml) {
 }
 
 // ─── Descarga combinada: tabla de equivalencias (pág. 1) + texto anonimizado ──
-function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, riskLabel, timestamp, originalLen, reviewed = false }) {
-  if (!reviewed || computeResidualRisk(anonText).hits.length) return;
-  if (!window.confirm('Este respaldo CONFIDENCIAL contiene los datos originales y la tabla de equivalencias. Se guardará en tu computador y puede sincronizarse si eliges una carpeta en la nube. No lo envíes a un modelo de IA. ¿Quieres descargarlo?')) return;
+// Quien llama decide la confirmación (diálogo propio) y ya comprobó el riesgo con sus categorías activas.
+async function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, riskLabel, timestamp, originalLen, reviewed = false, confirm }) {
+  if (!reviewed || computeResidualRisk(anonText, (activeCats || []).map(c => c.id)).hits.length) return false;
+  const ask = confirm || (message => Promise.resolve(window.confirm(message)));
+  if (!(await ask('Este respaldo CONFIDENCIAL contiene los datos originales y la tabla de equivalencias. Se guardará en tu computador y puede sincronizarse si eliges una carpeta en la nube. No lo envíes a un modelo de IA. ¿Quieres descargarlo?'))) return false;
   const dateStr = new Date().toISOString().slice(0, 10);
   const catMap = {};
   cats.forEach(c => { catMap[c.id] = c; });
@@ -746,12 +1064,14 @@ function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, risk
   ].join('\n');
 
   downloadWordDoc('respaldo-CONFIDENCIAL-' + dateStr, 'Respaldo confidencial — FuturIA', body);
+  return true;
 }
 
 // ─── Visor de documento modal ─────────────────────────────────────────────────
-function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileName, originalLen, resultIdentity, reviewed: parentReviewed, onReview }) {
+function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileName, originalLen, resultIdentity, reviewed: parentReviewed, onReview, whitelist }) {
   const [showMarks, setShowMarks] = React.useState(true);
   const [ownReviewed, setOwnReviewed] = React.useState(null);
+  const dialogs = useDialog();
   const identity = resultIdentity === undefined ? reps : resultIdentity;
   const reviewed = parentReviewed === undefined ? ownReviewed === identity : parentReviewed;
   const setReviewed = onReview || (value => setOwnReviewed(value ? identity : null));
@@ -794,7 +1114,8 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
   }, [open]);
   if (!open) return null;
 
-  const riskData = computeResidualRisk(anonText);
+  const activeIds = (activeCats || []).map(c => c.id);
+  const riskData = computeResidualRisk(anonText, activeIds, { whitelist });
   const riskInfo = getRiskInfo(riskData.score, reviewed);
   const canExport = reviewed && riskData.hits.length === 0;
 
@@ -806,14 +1127,15 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
     reps.forEach(r => { repMap[r.replacement] = r; });
     const tagPattern = /(\[[A-Z_]+_\d+\])/g;
 
+    // Respeta «Sin marcas» y nunca incluye pistas de rango en papel.
     const paragraphsHtml = anonText.split(/\n\n+/).filter(p => p.trim()).map(para => {
       const parts = para.split(tagPattern);
       const inner = parts.map(part => {
         const rep = repMap[part];
         if (rep) {
           const cat = catMap[rep.catId];
-          const label = rep.hint ? part + ' (' + rep.hint + ')' : part;
-          if (cat) return '<mark style="background-color:' + cat.bg + ';color:' + cat.color + ';border:1px solid ' + cat.border + ';border-radius:4px;padding:0 3px;font-family:monospace;font-size:0.88em">' + escXml(label) + '</mark>';
+          if (cat && showMarks) return '<mark style="background-color:' + cat.bg + ';color:' + cat.color + ';border:1.5px solid ' + cat.color + ';border-radius:4px;padding:0 3px;font-family:monospace;font-size:0.88em">' + escXml(part) + '</mark>';
+          return '<span style="font-family:monospace;font-size:0.88em">' + escXml(part) + '</span>';
         }
         return escXml(part);
       }).join('');
@@ -821,24 +1143,30 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
     }).join('');
 
     const dateStr = new Date().toLocaleString('es');
-    const printHtml = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Documento Anonimizado — FuturIA</title><style>' +
-      'body{font-family:Arial,sans-serif;font-size:11pt;color:#222;margin:2.5cm 3cm}' +
+    const printHtml = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Documento seudonimizado — FuturIA</title><style>' +
+      '@page{margin:2cm}body{font-family:Arial,sans-serif;font-size:11pt;color:#222;margin:0}' +
       'h1{font-size:16pt;color:#b00020;margin-bottom:6pt}' +
-      '.meta{font-size:9pt;color:#757575;margin-bottom:20pt;border-bottom:1px solid #e5e5e5;padding-bottom:8pt}' +
-      '.footer{margin-top:32pt;font-size:8pt;color:#aaa;border-top:1px solid #e5e5e5;padding-top:8pt}' +
+      '.meta{font-size:9pt;color:#6b6b6b;margin-bottom:20pt;border-bottom:1px solid #e5e5e5;padding-bottom:8pt}' +
+      '.footer{margin-top:32pt;font-size:8pt;color:#6b6b6b;border-top:1px solid #e5e5e5;padding-top:8pt}' +
       '</style></head><body>' +
-      '<h1>Documento Anonimizado</h1>' +
+      '<h1>Documento seudonimizado</h1>' +
       '<div class="meta">FuturIA Anonimizador IA &nbsp;·&nbsp; ' + escXml(dateStr) + '<br>' +
-      'Revisión: ' + escXml(riskInfo.label) + '. No certifica anonimización completa.</div>' +
+      'Revisión: ' + escXml(riskInfo.label) + '. Reversible con la llave de recuperación; no certifica anonimización completa.</div>' +
       paragraphsHtml +
       '<div class="footer">Procesado 100% en navegador — sin servidores, sin historial automático. futuria.substack.com</div>' +
       '</body></html>';
 
-    const win = window.open('', '_blank');
-    if (!win) { alert('El navegador bloqueó la ventana emergente. Permite pop-ups para esta página e inténtalo de nuevo.'); return; }
-    win.document.write(printHtml);
-    win.document.close();
-    setTimeout(() => win.print(), 500);
+    // iframe oculto: no depende de pop-ups ni de un temporizador; se imprime al cargar.
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    frame.srcdoc = printHtml;
+    frame.onload = () => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch (e) { dialogs && dialogs.alert('No se pudo abrir el diálogo de impresión. Usa «Descargar texto .txt» o «Guardar como PDF» desde el menú del navegador.'); }
+      setTimeout(() => frame.remove(), 60000);
+    };
+    document.body.appendChild(frame);
   };
 
   const handleDownload = () => {
@@ -853,31 +1181,32 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
       reviewed,
       timestamp: new Date().toLocaleString('es'),
       originalLen: originalLen || anonText.length,
+      confirm: m => dialogs ? dialogs.confirm(m, { ok: 'Descargar respaldo', danger: true }) : Promise.resolve(window.confirm(m)),
     });
   };
 
   return ReactDOM.createPortal(
-    <div ref={dialogRef} tabIndex={-1} className="no-print fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: '#f0f0f0' }} role="dialog" aria-modal="true" aria-label="Documento anonimizado">
+    <div ref={dialogRef} tabIndex={-1} className="no-print fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: '#f0f0f0' }} role="dialog" aria-modal="true" aria-label={'Documento seudonimizado. ' + riskInfo.label}>
       {/* Toolbar */}
       <div className="shrink-0 border-b border-[#e5e5e5] bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2 px-5 py-3">
           <button onClick={onClose}
-            className="flex items-center gap-1.5 rounded-xl border border-[#e5e5e5] px-3 py-2 text-sm font-semibold text-[#333333] hover:bg-[#fff5f6] transition">
+            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#9a9a9a] px-3 py-2 text-sm font-semibold text-[#333333] hover:bg-[#fff5f6] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
             ← Cerrar
           </button>
           <div className="mx-2 h-5 w-px bg-[#e5e5e5]" />
           <span className="text-sm font-semibold" style={{ color: riskInfo.color }}>{riskInfo.emoji} {riskInfo.label}</span>
-          {fileName && <span className="hidden text-xs text-[#757575] sm:inline">· {fileName}</span>}
+          {fileName && <span className="hidden text-xs text-[#6b6b6b] sm:inline">· {fileName}</span>}
           <div className="flex-1" />
           <button
-            onClick={() => setShowMarks(v => !v)}
-            className={cn('rounded-xl border px-3 py-2 text-xs font-semibold transition',
-              showMarks ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]' : 'border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]')}>
+            onClick={() => setShowMarks(v => !v)} aria-pressed={showMarks}
+            className={cn('min-h-[44px] rounded-xl border px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
+              showMarks ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]' : 'border-[#9a9a9a] bg-white text-[#6b6b6b] hover:bg-[#fafafa]')}>
             {showMarks ? '● Con marcas' : '○ Sin marcas'}
           </button>
           <button onClick={handlePrint} disabled={!canExport}
-            className="flex items-center gap-1.5 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2 text-xs font-semibold text-[#333333] hover:bg-[#fff5f6] transition">
-            🖨 Imprimir
+            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-[#9a9a9a] bg-white px-3 py-2 text-xs font-semibold text-[#333333] hover:bg-[#fff5f6] transition disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+            🖨 Imprimir / Guardar PDF
           </button>
           <AppButton onClick={() => canExport && downloadAnonText(anonText)} disabled={!canExport} className="text-xs">
             ↓ Descargar texto .txt
@@ -893,21 +1222,21 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
         )}
       </div>
 
-      <div className="shrink-0 px-5 py-2"><RiskSemaphore text={anonText} reviewed={reviewed} onReview={setReviewed} /></div>
+      <div className="shrink-0 px-5 py-2"><RiskSemaphore text={anonText} reviewed={reviewed} onReview={setReviewed} riskData={riskData} /></div>
       {/* Paper scroll area */}
       <div className="flex-1 overflow-y-auto py-8 px-4">
-        <div className="mx-auto max-w-3xl rounded-sm bg-white shadow-xl" style={{ padding: '3cm 3.5cm', minHeight: '27cm' }}>
+        <div className="mx-auto max-w-3xl rounded-sm bg-white shadow-xl" style={{ padding: 'clamp(16px, 5vw, 3cm) clamp(16px, 6vw, 3.5cm)', minHeight: 'min(27cm, 80vh)' }}>
           {/* Doc header */}
           <div className="mb-6 border-b border-[#e5e5e5] pb-4">
-            <div className="text-xs text-[#aaaaaa]">FuturIA Anonimizador IA &nbsp;·&nbsp; {new Date().toLocaleDateString('es')}</div>
-            {fileName && <div className="mt-0.5 text-xs text-[#aaaaaa]">Archivo: {fileName}</div>}
+            <div className="text-xs text-[#6b6b6b]">FuturIA Anonimizador IA &nbsp;·&nbsp; {new Date().toLocaleDateString('es')}</div>
+            {fileName && <div className="mt-0.5 text-xs text-[#6b6b6b]">Archivo: {fileName}</div>}
           </div>
 
           {/* Body */}
           <DocumentBody text={anonText} reps={reps} cats={cats} showMarks={showMarks} />
 
           {/* Doc footer */}
-          <div className="mt-8 border-t border-[#e5e5e5] pt-4 text-xs text-[#aaaaaa]">
+          <div className="mt-8 border-t border-[#e5e5e5] pt-4 text-xs text-[#6b6b6b]">
             Procesado 100% en navegador — sin servidores, sin historial automático. &nbsp; futuria.substack.com
           </div>
         </div>
@@ -918,33 +1247,34 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 }
 
 // ─── Pestaña Cómo usar ────────────────────────────────────────────────────────
-function HowToTab() {
+function HowToTab({ onStart }) {
   const steps = [
     { n: '1', icon: '📄', title: 'Pega o sube tu documento',
-      desc: 'Pega texto directamente en la pestaña Texto, o sube un archivo PDF, DOCX, TXT o CSV. También puedes usar las 50 plantillas de ejemplo organizadas en 8 industrias para probar la app. El DOC antiguo requiere conversión a DOCX.',
+      desc: 'En «Ocultar datos», pega el texto o carga un PDF, DOCX, TXT o CSV. También puedes usar las 50 plantillas de ejemplo (todas con datos ficticios) para probar la app. El DOC antiguo requiere conversión a DOCX.',
       tip: 'Los PDF escaneados necesitan OCR. Para información confidencial, usa una herramienta local autorizada por tu organización; no la subas a un OCR online.' },
-    { n: '2', icon: '⚙️', title: 'Configura las categorías',
-      desc: 'Activa o desactiva los tipos de datos a detectar. La categoría Credenciales siempre está activa. Los nombres se buscan por contexto, con posibles omisiones. Añade nombres, apodos, siglas internas y otros datos a Términos personalizados — un término por línea.',
-      tip: 'Activa solo lo necesario. Empresa, Dirección, Montos y Fechas son opcionales y pueden generar más falsos positivos.' },
-    { n: '3', icon: '🔒', title: 'Haz clic en "Anonimizar"',
-      desc: 'El sistema sustituye las coincidencias por etiquetas como [EMAIL_1] o [PERSONA_1]. El semáforo indica coincidencias pendientes, no seguridad garantizada. Revisa el resultado completo y confirma la revisión; copiar, descargar e imprimir quedan bloqueados hasta entonces.',
-      tip: 'Pasa el cursor sobre cualquier etiqueta para ver el valor original.' },
-    { n: '4', icon: '📤', title: 'Envía al LLM',
-      desc: 'Tras revisar, copia el resultado o descarga el texto .txt, que no incluye la tabla de originales. Compártelo únicamente cuando su contenido y las reglas de tu organización lo permitan. El contexto del documento aún puede identificar a personas.',
-      tip: 'El respaldo confidencial .doc conserva los originales para recuperarlos. No lo envíes a un modelo de IA. Su descarga requiere una confirmación adicional.' },
+    { n: '2', icon: '⚙️', title: 'Ajusta qué ocultar (opcional)',
+      desc: 'Los ajustes recomendados ya vienen activos: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, credenciales y fecha de nacimiento. En «Qué ocultar» puedes usar un ajuste rápido («Identidad sí, cifras no», «Máxima cobertura»), añadir términos propios de tu empresa o una lista blanca de lo que nunca debe ocultarse.',
+      tip: 'Montos, Direcciones, Empresas y Fechas son heurísticas: si las activas, revisa con más cuidado los falsos positivos.' },
+    { n: '3', icon: '🔒', title: 'Pulsa «Ocultar datos sensibles»',
+      desc: 'Cada dato se sustituye por una etiqueta como [EMAIL_1] o [PERSONA_1]; la misma persona recibe siempre la misma etiqueta. El semáforo indica si quedan datos pendientes de las categorías activas, no seguridad garantizada. Revisa el resultado y confirma la revisión; copiar, descargar e imprimir se habilitan después.',
+      tip: 'Toca o pulsa Enter sobre una etiqueta para ver el dato original o dejarlo visible si no identifica a nadie.' },
+    { n: '4', icon: '🔑', title: 'Guarda la llave de recuperación',
+      desc: 'La llave (.tsv) contiene los datos originales y es lo único que permite revertir el texto. Guárdala junto al documento. Si cierras la pestaña sin guardarla, la app te avisa; sin llave no hay recuperación.',
+      tip: 'La llave y el respaldo .doc son CONFIDENCIALES. Nunca los pegues en un modelo de IA.' },
     { n: '5', icon: '💬', title: 'Procesa con el modelo de IA',
-      desc: 'Haz tu consulta al LLM normalmente. El modelo responderá conservando las etiquetas [TAG_N] en el texto. Copia la respuesta completa — con las etiquetas incluidas.',
-      tip: 'La mayoría de los modelos preservan las etiquetas correctamente. Si el modelo las elimina, pídele explícitamente que las conserve en su respuesta.' },
+      desc: '«Copiar para la IA» incluye una instrucción para que el modelo conserve las etiquetas. Haz tu consulta normalmente y copia la respuesta completa, con las etiquetas incluidas. El texto seudonimizado sigue siendo información de tu empresa: aplica la política de datos de tu organización y del proveedor de IA.',
+      tip: 'Aunque el modelo altere una etiqueta ([PERSONA 1], PERSON_1, negritas), la recuperación la repara.' },
     { n: '6', icon: '🔄', title: 'Recupera el texto original',
-      desc: 'Ve a la pestaña "🔄 Recuperar" y pega el texto que te devolvió el LLM. Si estás en la misma sesión, el mapeo se carga automáticamente. Si cerraste el navegador, pega la tabla de equivalencias del .doc descargado. Un clic y el texto vuelve con los datos reales.',
-      tip: 'Al recargar se pierde el mapa en memoria. Para recuperarlo en otra sesión, guarda antes el respaldo confidencial. Los archivos descargados y el portapapeles no se borran al cerrar.' },
+      desc: 'En «Recuperar», pega la respuesta de la IA. En la misma sesión la llave se usa sola; en otra sesión carga el archivo .tsv o pega la tabla del respaldo .doc. Los valores restaurados aparecen resaltados para que compruebes que cayeron en su sitio.',
+      tip: 'Los archivos descargados y el portapapeles no se borran al cerrar la app; cuida dónde quedan.' },
   ];
 
   return (
     <div className="space-y-8">
       <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6">
         <h2 className="mb-2 text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
-        <p className="mb-4 text-sm text-[#757575]">Protege datos sensibles antes de enviar documentos a modelos de IA. Procesamiento 100% local — sin servidores, sin historial automático, sin registro.</p>
+        <p className="mb-4 text-sm text-[#6b6b6b]">Herramienta gratuita para equipos de empresa en Hispanoamérica. Oculta datos sensibles antes de enviar información a modelos de IA. Procesamiento 100% local — sin servidores, sin historial automático, sin registro, sin pago.</p>
+        {onStart ? <div className="mb-4"><AppButton onClick={onStart}>Empezar ahora →</AppButton></div> : null}
         <div className="rounded-2xl border border-[#b00020]/20 bg-white p-4">
           <p className="text-sm font-semibold text-[#222222] mb-1">¿Por qué es seguro usar esta app?</p>
           <p className="text-sm leading-relaxed text-[#333333]">
@@ -2332,85 +2662,171 @@ function TemplatesPanel({ onSelect, onClose }) {
   );
 }
 
-// ─── Pestaña Anonimizar ───────────────────────────────────────────────────────
-function AnonTab({ setLastResult }) {
+// ─── Panel compartido de categorías, términos y lista blanca ─────────────────
+const PRESETS = [
+  { id: 'default', label: 'Predeterminado', desc: 'Identidad, contactos, cuentas y credenciales', cats: ['person', 'credentials', 'url', 'email', 'financial', 'ip', 'fiscal', 'phone', 'birthdate'] },
+  { id: 'identity', label: 'Identidad sí, cifras no', desc: 'Oculta quién; conserva montos, fechas y cantidades para análisis financiero', cats: ['person', 'credentials', 'email', 'financial', 'ip', 'fiscal', 'phone', 'birthdate', 'url', 'company', 'address'] },
+  { id: 'max', label: 'Máxima cobertura', desc: 'Todas las categorías, incluidas las heurísticas (más falsos positivos)', cats: CATS.map(c => c.id) },
+];
+
+function GrowingTextarea({ value, onChange, minRows = 3, maxRows = 14, className, visible = true, ...rest }) {
+  const ref = useRef(null);
+  React.useLayoutEffect(() => {
+    const el = ref.current; if (!el || !visible || !el.offsetParent) return;
+    el.style.height = 'auto';
+    const line = parseFloat(getComputedStyle(el).lineHeight) || 22;
+    const min = line * minRows + 24;
+    const max = line * maxRows + 24;
+    el.style.height = Math.max(min, Math.min(el.scrollHeight, max)) + 'px';
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  }, [value, visible]);
+  return <textarea ref={ref} rows={minRows} value={value} onChange={onChange} className={className} {...rest} />;
+}
+
+function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, whitelist, onWhitelist, collapsed, onCollapsedChange }) {
+  const activeCount = cats.filter(c => c.on).length;
+  const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
+  return (
+    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm" aria-labelledby="cats-title">
+      <button type="button" aria-expanded={!collapsed} aria-controls="cats-body" onClick={() => onCollapsedChange(!collapsed)}
+        className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-[28px] px-6 py-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+        <span className="flex items-center gap-2">
+          <span id="cats-title" className="font-bold text-[#222222]">Qué ocultar</span>
+          <span className="rounded-full bg-[#fff5f6] px-2.5 py-0.5 text-xs font-semibold text-[#b00020]">{activeCount} categorías activas</span>
+        </span>
+        <span className="text-sm text-[#6b6b6b]" aria-hidden="true">{collapsed ? '▸ Ajustar' : '▾ Ocultar ajustes'}</span>
+      </button>
+      <div id="cats-body" hidden={collapsed} className="space-y-5 px-6 pb-6">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Ajustes rápidos">
+          {PRESETS.map(p => (
+            <button key={p.id} type="button" onClick={() => onPreset(p)} title={p.desc}
+              className="min-h-[44px] rounded-2xl border border-[#9a9a9a] bg-white px-3 py-2 text-sm font-semibold text-[#333333] hover:bg-[#fff5f6] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" role="group" aria-label="Categorías de detección">
+          {cats.map(c => (
+            <button key={c.id} type="button" onClick={() => onToggle(c.id)} aria-pressed={c.on} disabled={c.alwaysOn} title={c.label + ' — ej.: ' + c.ex}
+              className={cn('flex min-h-[44px] items-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
+                c.alwaysOn ? 'border-[#dc2626] bg-[#fef2f2] text-[#dc2626] cursor-default'
+                  : c.on ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]'
+                  : 'border-[#9a9a9a] bg-white text-[#6b6b6b] hover:bg-[#fafafa]')}>
+              <span aria-hidden="true" className="shrink-0">{c.alwaysOn ? '🔒' : c.on ? '☑' : '☐'}</span>
+              <span className="min-w-0 leading-tight">{c.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-5 md:grid-cols-2">
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <label htmlFor="custom-terms" className="text-sm font-semibold text-[#222222]">Términos a ocultar siempre</label>
+              <InfoIcon text="Nombres propios, siglas internas, códigos de proyecto, nombres de clientes o proveedores: cualquier término que quieras sustituir y que no cubra una categoría. Un término por línea, sin distinción de mayúsculas. Se reemplazan por [PERSONALIZADO_N]." />
+            </div>
+            <GrowingTextarea id="custom-terms" visible={!collapsed} className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
+              placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ"} aria-describedby="custom-help" />
+            <p id="custom-help" className="mt-1.5 text-xs text-[#6b6b6b]">Un término por línea · mínimo 2 caracteres · crece al escribir</p>
+          </div>
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <label htmlFor="whitelist" className="text-sm font-semibold text-[#222222]">Lista blanca: no ocultar nunca</label>
+              <InfoIcon text="Tu propia empresa, tus productos, ciudades, cargos genéricos o correos públicos que no identifican a nadie. Lo que esté aquí no se sustituye ni cuenta como pendiente en la revisión." />
+            </div>
+            <GrowingTextarea id="whitelist" visible={!collapsed} className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
+              placeholder={"Mi Empresa S.A.\nventas@miempresa.com\nBogotá"} aria-describedby="whitelist-help" />
+            <p id="whitelist-help" className="mt-1.5 text-xs text-[#6b6b6b]">Un término por línea · también puedes añadir desde cada etiqueta del resultado</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Pestaña de trabajo: texto o documento, mismo estado, mismo resultado ──────
+function WorkTab({ setLastResult, lastResult, initialMode }) {
+  const dialogs = useDialog();
   const [inputText, setInputText] = useState('');
+  const [sourceName, setSourceName] = useState(null);
   const [result, setResult] = useState(null);
   const [reviewed, setReviewed] = useState(false);
   React.useEffect(() => { setReviewed(false); }, [result]);
   const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
   const [customTerms, setCustomTerms] = useState('');
+  const [whitelist, setWhitelist] = useState('');
+  const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [showOriginal, setShowOriginal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedTable, setCopiedTable] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
+  const [status, setStatus] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerData, setViewerData] = useState(null);
+  const [keySaved, setKeySaved] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const viewerGeneration = useRef(0);
   const outputRef = useRef(null);
   const fileInputRef = useRef(null);
-
-  const loadTemplate = (template) => {
-    if (inputText && !window.confirm('¿Reemplazar el texto actual con la plantilla "' + template.name + '"?')) return;
-    setInputText(template.text);
-    setResult(null);
-    setShowTemplates(false);
-    // Auto-activate relevant categories
-    setCats(prev => prev.map(c => {
-      if (c.alwaysOn) return c;
-      const shouldActivate = c.id === 'person' || template.cats.includes(c.id);
-      return Object.assign({}, c, { on: shouldActivate });
-    }));
-  };
+  const announce = message => { setStatus(''); setTimeout(() => setStatus(message), 30); };
 
   const activeCats = cats.filter(c => c.on);
+  const activeIds = activeCats.map(c => c.id);
   const allCats = [...cats, CUSTOM_CAT];
   const hasCustomTerms = customTerms.trim().split('\n').some(t => t.trim().length >= 2);
 
-  const loadSample = () => {
-    if (inputText && !window.confirm('¿Reemplazar el texto actual con el ejemplo?')) return;
-    setInputText(SAMPLE_TEXT);
-    setResult(null);
+  // Aviso antes de perder la llave de recuperación en memoria.
+  React.useEffect(() => {
+    if (!result || keySaved) return;
+    const handler = e => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [result, keySaved]);
+
+  const invalidate = () => { setResult(null); setKeySaved(false); };
+
+  const loadTemplate = async (template) => {
+    if (inputText && !(await dialogs.confirm('¿Reemplazar el texto actual con la plantilla «' + template.name + '»?', { ok: 'Reemplazar' }))) return;
+    setInputText(template.text); setSourceName(null); invalidate(); setShowTemplates(false);
+    setCats(prev => prev.map(c => c.alwaysOn ? c : Object.assign({}, c, { on: c.id === 'person' || c.id === 'birthdate' || template.cats.includes(c.id) })));
+    announce('Plantilla cargada: ' + template.name);
   };
 
-  const clear = () => {
-    if (!window.confirm('¿Borrar el texto y el resultado? Esta acción no se puede deshacer.')) return;
-    setInputText('');
-    setResult(null);
-    setCustomTerms('');
-    setLastResult(null);
-    setViewerData(null);
+  const trySample = () => {
+    setInputText(SAMPLE_TEXT); setSourceName(null);
+    const r = runAnonymize(SAMPLE_TEXT, activeCats, customTerms, { whitelist });
+    setResult(r); setKeySaved(false); if (setLastResult) setLastResult(r);
+    announce('Ejemplo procesado: ' + r.reps.length + ' datos sustituidos.');
+    setTimeout(() => outputRef.current && outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  };
+
+  const clear = async () => {
+    if (!(await dialogs.confirm('¿Borrar el texto y el resultado? Si no guardaste la llave de recuperación, no podrás recuperar los originales.', { ok: 'Borrar', danger: true }))) return;
+    setInputText(''); setSourceName(null); invalidate(); setCustomTerms(''); setLastResult(null); setViewerData(null);
+    announce('Texto y resultado borrados.');
   };
 
   const handleFile = async (file) => {
     if (!file) return;
-    setUploading(true);
-    setUploadMsg('Procesando archivo…');
+    setUploading(true); setUploadMsg('Procesando archivo…');
     try {
-      const text = await extractTextFromFile(file, msg => setUploadMsg(msg));
+      const text = await extractTextFromFile(file, msg => { setUploadMsg(msg); });
       if (!text.trim()) throw new Error('No se pudo extraer texto del archivo. ¿Está protegido con contraseña o es un PDF escaneado (solo imágenes)?');
-      setInputText(text);
-      setResult(null);
-      setUploadMsg('');
+      setInputText(text); setSourceName(file.name); invalidate(); setUploadMsg('');
+      announce('Archivo cargado: ' + file.name + ', ' + text.length.toLocaleString() + ' caracteres.');
     } catch (err) {
       setUploadMsg('');
-      alert('Error al leer el archivo:\n' + err.message);
-    } finally {
-      setUploading(false);
-    }
+      dialogs.alert(err.message, 'No se pudo leer el archivo');
+    } finally { setUploading(false); }
   };
 
   const anonymize = () => {
     if (!inputText.trim()) return;
-    if (activeCats.length === 0 && !hasCustomTerms) {
-      alert('Activa al menos una categoría o añade términos personalizados antes de anonimizar.');
-      return;
-    }
-    const r = runAnonymize(inputText, activeCats, customTerms);
-    setResult(r);
+    if (activeCats.length === 0 && !hasCustomTerms) { dialogs.alert('Activa al menos una categoría o añade términos a ocultar antes de procesar.'); return; }
+    const r = runAnonymize(inputText, activeCats, customTerms, { whitelist });
+    setResult(r); setKeySaved(false);
     if (setLastResult) setLastResult(r);
+    announce('Listo: ' + r.reps.length + ' datos sustituidos. Revisa el resultado antes de copiarlo.');
     setTimeout(() => outputRef.current && outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   };
 
@@ -2418,510 +2834,235 @@ function AnonTab({ setLastResult }) {
     const cat = CATS.find(c => c.id === id);
     if (cat && cat.alwaysOn) return;
     setCats(prev => prev.map(c => c.id === id ? Object.assign({}, c, { on: !c.on }) : c));
-    setResult(null);
+    invalidate();
+  };
+  const applyPreset = (preset) => {
+    setCats(prev => prev.map(c => c.alwaysOn ? c : Object.assign({}, c, { on: preset.cats.includes(c.id) })));
+    invalidate(); announce('Ajuste aplicado: ' + preset.label);
+  };
+  const excludeFromResult = (rep) => {
+    setWhitelist((whitelist.trim() ? whitelist.replace(/\s+$/, '') + '\n' : '') + rep.original);
+    invalidate(); announce('«' + rep.original + '» añadido a la lista blanca. Vuelve a procesar.');
   };
 
-  const copyOutput = () => {
-    if (!result || !reviewed || computeResidualRisk(result.out).hits.length) return;
-    copyLocalText(result.out).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); } });
+  const riskData = useMemo(() => result ? computeResidualRisk(result.out, activeIds, { whitelist }) : null, [result, activeIds.join(','), whitelist]);
+  const canExport = !!(result && riskData && riskData.hits.length === 0 && reviewed);
+
+  const copyOutput = (withInstruction) => {
+    if (!canExport) return;
+    const instruction = withInstruction ? 'Instrucción: el texto siguiente contiene etiquetas entre corchetes como [PERSONA_1] o [EMAIL_2]. Consérvalas exactamente igual en tu respuesta; no las traduzcas, numeres ni expliques.\n\n' : '';
+    copyLocalText(instruction + result.out, m => dialogs.alert(m)).then(ok => { if (ok) { setCopied(true); announce('Texto copiado al portapapeles.'); setTimeout(() => setCopied(false), 2000); } });
   };
 
-  const copyTable = () => {
+  const copyTable = async () => {
     if (!result || !result.reps.length) return;
-    if (!window.confirm('Este mapa CONFIDENCIAL contiene los datos originales. El portapapeles puede conservarlos o sincronizarlos. No lo pegues en un modelo de IA. ¿Quieres copiarlo?')) return;
-    copyLocalText(serializeEquivalences(result.reps)).then(ok => {
-      if (!ok) return;
-      setCopiedTable(true); setTimeout(() => setCopiedTable(false), 2000);
-    });
+    const ok = await dialogs.confirm('Esta llave CONFIDENCIAL contiene los datos originales. El portapapeles puede conservarlos o sincronizarlos. No la pegues en un modelo de IA. ¿Quieres copiarla?', { ok: 'Copiar llave', danger: true });
+    if (!ok) return;
+    // La escritura ocurre tras cerrar el diálogo, dentro de la misma tarea de clic del botón del diálogo.
+    copyLocalText(serializeEquivalences(result.reps), m => dialogs.alert(m)).then(done => { if (done) { setCopiedTable(true); setKeySaved(true); announce('Llave copiada.'); setTimeout(() => setCopiedTable(false), 2000); } });
+  };
+
+  const downloadKey = () => {
+    if (!result || !result.reps.length) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const base = (sourceName ? sourceName.replace(/\.[^.]+$/, '') : 'texto');
+    const blob = new Blob(['\uFEFF' + serializeEquivalences(result.reps)], { type: 'text/tab-separated-values;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'LLAVE-CONFIDENCIAL-NO-SUBIR-A-IA_' + base + '_' + stamp + '.tsv';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    setKeySaved(true); announce('Llave de recuperación descargada.');
   };
 
   const downloadDocs = () => {
-    if (!result || !reviewed || computeResidualRisk(result.out).hits.length) return;
-    const { score } = computeResidualRisk(result.out);
-    const riskInfo = getRiskInfo(score);
+    if (!canExport) return;
+    const riskInfo = getRiskInfo(riskData.score);
     const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
-    downloadCombinedDoc({
-      anonText: result.out,
-      reps: result.reps,
-      cats: allCats,
-      activeCats: effectiveActiveCats,
-      riskScore: score,
-      riskLabel: riskInfo.label,
-      reviewed,
-      timestamp: new Date().toLocaleString('es'),
-      originalLen: inputText.length,
-    });
+    downloadCombinedDoc({ anonText: result.out, reps: result.reps, cats: allCats, activeCats: effectiveActiveCats, riskScore: riskData.score, riskLabel: riskInfo.label, reviewed, timestamp: new Date().toLocaleString('es'), originalLen: inputText.length,
+      confirm: m => dialogs.confirm(m, { ok: 'Descargar respaldo', danger: true }) }).then(done => { if (done) setKeySaved(true); });
   };
 
-  // El visor de documento solo existía en la pestaña Documento, así que quien
-  // trabajaba pegando texto no sabía que estaba ahí. Se abre también desde aquí.
   const openViewer = () => {
     if (!result) return;
     const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
-    setViewerData({
-      generation: ++viewerGeneration.current,
-      anonText: result.out,
-      reps: result.reps,
-      cats: allCats,
-      activeCats: effectiveActiveCats,
-      fileName: null,
-      originalLen: inputText.length,
-    });
+    setViewerData({ generation: ++viewerGeneration.current, anonText: result.out, reps: result.reps, cats: allCats, activeCats: effectiveActiveCats, fileName: sourceName, originalLen: inputText.length });
     setViewerOpen(true);
   };
 
-  const riskData = result ? computeResidualRisk(result.out) : null;
-  const canExport = result && riskData && riskData.hits.length === 0 && reviewed;
+  const handleDrop = (e) => { e.preventDefault(); setDragOver(false); const file = e.dataTransfer.files && e.dataTransfer.files[0]; if (file) handleFile(file); };
   const totalDetected = result ? result.reps.length : 0;
-  const byCategory = result
-    ? allCats.map(c => Object.assign({}, c, { count: result.reps.filter(r => r.catId === c.id).length })).filter(c => c.count > 0)
-    : [];
+  const byCategory = result ? allCats.map(c => Object.assign({}, c, { count: result.reps.filter(r => r.catId === c.id).reduce((s, r) => s + (r.count || 1), 0) })).filter(c => c.count > 0) : [];
+  const fileAccept = ".txt,.csv,.pdf,.doc,.docx,text/plain,text/csv,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
   return (
     <div className="space-y-6">
-      {/* Panel de plantillas */}
-      {showTemplates ? (
-        <TemplatesPanel onSelect={loadTemplate} onClose={() => setShowTemplates(false)} />
-      ) : null}
+      <LiveStatus message={status} />
+      {showTemplates ? <TemplatesPanel onSelect={loadTemplate} onClose={() => setShowTemplates(false)} /> : null}
 
-      {/* Categorías */}
-      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <div className="mb-4 flex items-center gap-2">
-          <h3 className="font-bold text-[#222222]">Categorías de detección</h3>
-          <InfoIcon text="Las categorías en rojo siempre están activas. Las demás se activan o desactivan. Las marcadas con (heurístico) tienen mayor riesgo de falsos positivos." />
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {cats.map(c => (
-            <button
-              key={c.id}
-              onClick={() => toggleCat(c.id)}
-              aria-pressed={c.on}
-              disabled={c.alwaysOn}
-              className={cn(
-                "flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm font-semibold transition text-left",
-                c.alwaysOn
-                  ? "border-[#fecaca] bg-[#fef2f2] text-[#dc2626] cursor-default"
-                  : c.on
-                    ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]"
-                    : "border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]"
-              )}
-            >
-              {c.alwaysOn
-                ? <span className="text-xs">🔒</span>
-                : <span className={cn("h-2 w-2 shrink-0 rounded-full", c.on ? "bg-[#b00020]" : "bg-[#e5e5e5]")} />
-              }
-              <span className="truncate">{c.label}</span>
-            </button>
-          ))}
-        </div>
-        {/* Términos personalizados */}
-        <div className="mt-5 pt-5 border-t border-[#e5e5e5]">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-semibold text-[#222222]">Términos personalizados</span>
-            <InfoIcon text="Escribe aquí nombres propios, siglas internas, códigos de proyecto, o cualquier término que quieras anonimizar y que no cubre ninguna categoría. Un término por línea. Se detectan sin distinción de mayúsculas y se reemplazan por [PERSONALIZADO_N]." />
-          </div>
-          <textarea
-            className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-3 font-mono text-sm text-[#222222] outline-none transition resize-y"
-            onFocus={e => e.target.style.borderColor = '#b00020'}
-            onBlur={e => e.target.style.borderColor = '#e5e5e5'}
-            rows={15}
-            value={customTerms}
-            onChange={e => { setCustomTerms(e.target.value); setResult(null); }}
-            placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ\n(un término por línea)"}
-            aria-label="Términos personalizados para anonimizar"
-          />
-          <p className="mt-1.5 text-xs text-[#757575]">Un término por línea · Detección sin distinción de mayúsculas · Mínimo 2 caracteres por término</p>
-        </div>
-      </div>
-
-      {/* Entrada */}
-      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+      {/* Entrada: primero lo que el usuario quiere hacer */}
+      <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6" aria-labelledby="input-title"
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
         <div className="mb-3 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2">
-            <h3 className="font-bold text-[#222222]">Texto a anonimizar</h3>
-            <InfoIcon text="Pega aquí emails, contratos, informes o cualquier documento. O sube un archivo .txt / .csv." />
+            <h2 id="input-title" className="font-bold text-[#222222]">Pega el texto o carga un documento</h2>
+            <InfoIcon text="Correos, contratos, informes, tablas, chats: pega el texto o carga un PDF, DOCX, TXT o CSV de hasta 25 MB y 300 páginas. Todo se procesa en tu navegador." />
           </div>
           <div className="flex gap-2 flex-wrap">
-            <AppButton variant="secondary" disabled={uploading} onClick={() => fileInputRef.current && fileInputRef.current.click()}>
-              {uploading ? '⏳ Procesando…' : '↑ PDF / DOCX / TXT / CSV'}
+            <AppButton variant="secondary" disabled={uploading} onClick={() => fileInputRef.current && fileInputRef.current.click()} aria-describedby="file-limits">
+              {uploading ? '⏳ Procesando…' : '↑ Cargar PDF / DOCX / TXT / CSV'}
             </AppButton>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".txt,.csv,.pdf,.doc,.docx"
-              className="hidden"
-              onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ''; }}
-            />
-            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>
-              📋 Ver plantillas
-            </AppButton>
+            <input ref={fileInputRef} type="file" accept={fileAccept} className="hidden" aria-label="Seleccionar archivo"
+              onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>📋 Plantillas de ejemplo</AppButton>
             {inputText ? <AppButton variant="secondary" onClick={clear} disabled={uploading}>Limpiar</AppButton> : null}
           </div>
         </div>
-        <textarea
-          className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-4 font-mono text-sm text-[#222222] outline-none transition resize-y"
-          style={{ focusBorderColor: '#b00020' }}
-          onFocus={e => e.target.style.borderColor = '#b00020'}
-          onBlur={e => e.target.style.borderColor = '#e5e5e5'}
-          rows={24}
-          value={inputText}
-          onChange={e => { setInputText(e.target.value); setResult(null); }}
-          placeholder="Pega aquí el texto que deseas anonimizar antes de enviarlo a un modelo de IA…"
-          aria-label="Texto de entrada para anonimizar"
-        />
+        <textarea id="input-text"
+          className={cn("w-full rounded-2xl border bg-white p-4 font-mono text-base sm:text-sm text-[#222222] outline-none transition resize-y focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020]",
+            dragOver ? 'border-[#b00020] bg-[#fff5f6]' : 'border-[#9a9a9a]')}
+          rows={14} value={inputText}
+          onChange={e => { setInputText(e.target.value); setSourceName(null); invalidate(); }}
+          placeholder="Pega aquí el texto que vas a enviar a ChatGPT, Claude o Gemini… o arrastra un archivo sobre este recuadro."
+          aria-label="Texto a procesar" />
+        {sourceName ? <p className="mt-2 text-xs text-[#6b6b6b]">Archivo: {sourceName} · puedes editar el texto extraído antes de procesar.</p> : null}
         {uploading && uploadMsg ? (
-          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1d4ed8]">
-            <span className="animate-spin text-lg">⏳</span>
-            <span>{uploadMsg}</span>
+          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1d4ed8]" role="status">
+            <span className="animate-spin text-lg" aria-hidden="true">⏳</span><span>{uploadMsg}</span>
           </div>
         ) : null}
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-          <span className="text-xs text-[#757575]">{inputText.length.toLocaleString()} caracteres · {activeCats.length} categorías activas</span>
-          <AppButton onClick={anonymize} disabled={!inputText.trim() || activeCats.length === 0 || uploading}>
-            🔒 Anonimizar
-          </AppButton>
+          <span id="file-limits" className="text-xs text-[#6b6b6b]">{inputText.length.toLocaleString()} caracteres · {activeCats.length} categorías activas · hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas</span>
+          <div className="flex gap-2 flex-wrap">
+            {!inputText ? <AppButton variant="secondary" onClick={trySample}>Probar con un ejemplo</AppButton> : null}
+            <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>🔒 Ocultar datos sensibles</AppButton>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* Resultado */}
+      <CategoryPanel cats={cats} onToggle={toggleCat} onPreset={applyPreset} customTerms={customTerms} onCustomTerms={v => { setCustomTerms(v); invalidate(); }}
+        whitelist={whitelist} onWhitelist={v => { setWhitelist(v); invalidate(); }} collapsed={settingsCollapsed} onCollapsedChange={setSettingsCollapsed} />
+
       {result ? (
-        <div ref={outputRef} className="space-y-4">
-          {/* Semáforo */}
-          <RiskSemaphore text={result.out} reviewed={reviewed} onReview={setReviewed} />
+        <div ref={outputRef} className="space-y-4" style={{ scrollMarginTop: '130px' }}>
+          <h2 className="sr-only">Resultado</h2>
+          <RiskSemaphore text={result.out} reviewed={reviewed} onReview={setReviewed} riskData={riskData} />
 
-          {/* Bloqueo si riesgo alto */}
-          {riskData && !canExport ? (
-            <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] p-4 text-sm text-[#dc2626] font-semibold">
-              Exportación deshabilitada. Retira las coincidencias pendientes, revisa el resultado y confirma la revisión manual.
+          {!canExport ? (
+            <div className="rounded-2xl border border-[#dc2626] bg-[#fef2f2] p-4 text-sm text-[#b91c1c] font-semibold">
+              Copiar, descargar e imprimir se habilitan al confirmar la revisión manual{riskData.hits.length ? ' y retirar los datos pendientes' : ''}.
             </div>
           ) : null}
 
-          {/* Resumen */}
           <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              { val: totalDetected, label: 'datos detectados', highlight: true },
-              { val: byCategory.length, label: 'categorías con coincidencias' },
-              { val: result.out.length.toLocaleString(), label: 'caracteres en resultado' },
-            ].map((item, i) => (
+            {[{ val: totalDetected, label: 'datos distintos sustituidos', highlight: true }, { val: byCategory.length, label: 'categorías con coincidencias' }, { val: result.reps.reduce((s, r) => s + (r.count || 1), 0), label: 'apariciones cubiertas' }].map((item, i) => (
               <div key={i} className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-4 text-center">
                 <div className={cn("text-3xl font-bold", item.highlight ? "text-[#b00020]" : "text-[#222222]")}>{item.val}</div>
-                <div className="text-xs text-[#757575] mt-1">{item.label}</div>
+                <div className="text-xs text-[#6b6b6b] mt-1">{item.label}</div>
               </div>
             ))}
           </div>
 
-          {/* Badges por categoría */}
           {byCategory.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
+            <ul className="flex flex-wrap gap-2" aria-label="Leyenda por categoría">
               {byCategory.map(c => (
-                <span key={c.id} className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold"
-                  style={{ backgroundColor: c.bg, color: c.color, borderColor: c.border }}>
-                  {c.label}: {c.count}
-                </span>
+                <li key={c.id} className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold" style={{ backgroundColor: c.bg, color: c.color, borderColor: c.color }}>
+                  <span aria-hidden="true">{c.icon}</span>{c.label}: {c.count}
+                </li>
               ))}
-            </div>
+            </ul>
           ) : null}
 
-          {/* Texto anonimizado */}
-          <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+          <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6" aria-labelledby="output-title">
             <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-3">
-                <h3 className="font-bold text-[#222222]">Texto anonimizado</h3>
-                <button
-                  onClick={() => setShowOriginal(v => !v)}
-                  className={cn("rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
-                    showOriginal ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]")}
-                >
+                <h3 id="output-title" className="font-bold text-[#222222]">Texto seudonimizado</h3>
+                <button type="button" onClick={() => setShowOriginal(v => !v)} aria-expanded={showOriginal}
+                  className={cn("min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]",
+                    showOriginal ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#9a9a9a] bg-white text-[#6b6b6b] hover:bg-[#fafafa]")}>
                   {showOriginal ? '▼ Ocultar original' : '▶ Ver comparativa'}
                 </button>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <AppButton variant="secondary" onClick={copyOutput} disabled={!canExport}>
-                  {copied ? '✓ Copiado' : '📋 Copiar texto'}
-                </AppButton>
-                <AppButton variant="secondary" onClick={openViewer}>
-                  🔎 Ver como documento
-                </AppButton>
-                <AppButton onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>
-                  ↓ Descargar texto .txt
-                </AppButton>
+                <AppButton onClick={() => copyOutput(true)} disabled={!canExport}>{copied ? '✓ Copiado' : '📋 Copiar para la IA'}</AppButton>
+                <AppButton variant="secondary" onClick={() => copyOutput(false)} disabled={!canExport}>Copiar solo el texto</AppButton>
+                <AppButton variant="secondary" onClick={openViewer}>🔎 Ver como documento</AppButton>
+                <AppButton variant="secondary" onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>↓ Descargar .txt</AppButton>
               </div>
             </div>
-
-            {/* Vista comparativa */}
             {showOriginal ? (
               <div className="grid gap-4 md:grid-cols-2 mb-4">
                 <div>
-                  <div className="mb-2 text-xs font-semibold text-[#757575]">ORIGINAL</div>
-                  <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto">
-                    <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-[#757575]">{inputText}</pre>
-                  </div>
+                  <div className="mb-2 text-xs font-semibold text-[#6b6b6b]">ORIGINAL</div>
+                  <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto"><pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-[#444444]">{inputText}</pre></div>
                 </div>
                 <div>
-                  <div className="mb-2 text-xs font-semibold text-[#b00020]">ANONIMIZADO</div>
-                  <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto">
-                    <HighlightedOutput text={result.out} reps={result.reps} cats={allCats} />
-                  </div>
+                  <div className="mb-2 text-xs font-semibold text-[#b00020]">SEUDONIMIZADO</div>
+                  <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto"><HighlightedOutput text={result.out} reps={result.reps} cats={allCats} onExclude={excludeFromResult} /></div>
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto">
-                <HighlightedOutput text={result.out} reps={result.reps} cats={allCats} />
-              </div>
+              <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto"><HighlightedOutput text={result.out} reps={result.reps} cats={allCats} onExclude={excludeFromResult} /></div>
             )}
+            <p className="mt-2 text-xs text-[#6b6b6b]">Toca o pulsa Enter sobre una etiqueta para ver el dato original o dejarlo visible (lista blanca). «Copiar para la IA» añade una instrucción para que el modelo conserve las etiquetas.</p>
+          </section>
 
-            <p className="mt-2 text-xs text-[#757575]">
-              Pasa el cursor sobre las etiquetas para ver el valor original.
-              {!canExport ? ' La exportación requiere revisión manual y no tener coincidencias pendientes.' : ''}
-            </p>
-          </div>
-
-          {/* Tabla de equivalencias */}
           {result.reps.length > 0 ? (
-            <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+            <section className="rounded-[28px] border border-[#b00020] bg-white shadow-sm p-6" aria-labelledby="key-title">
               <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-[#222222]">Tabla de equivalencias</h3>
-                  <InfoIcon text="Esta tabla contiene los originales. Solo se incluye en el respaldo confidencial .doc, nunca en la descarga de texto .txt. No la compartas con un modelo." />
+                  <h3 id="key-title" className="font-bold text-[#222222]">🔑 Llave de recuperación (confidencial)</h3>
+                  <InfoIcon text="Contiene los datos originales. Guárdala junto al documento para recuperar la respuesta de la IA en otra sesión. Nunca la pegues en un modelo de IA." />
                 </div>
-                <div className="flex gap-2">
-                  <AppButton variant="secondary" onClick={copyTable}>
-                    {copiedTable ? '✓ Copiada' : '📋 Copiar mapa confidencial'}
-                  </AppButton>
-                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport}>
-                    ↓ Respaldo confidencial .doc
-                  </AppButton>
+                <div className="flex gap-2 flex-wrap">
+                  <AppButton onClick={downloadKey}>{keySaved ? '✓ Llave guardada' : '↓ Guardar llave (.tsv)'}</AppButton>
+                  <AppButton variant="secondary" onClick={copyTable}>{copiedTable ? '✓ Copiada' : '📋 Copiar llave'}</AppButton>
+                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport}>↓ Respaldo .doc con originales</AppButton>
                 </div>
               </div>
+              {!keySaved ? <p className="mb-3 rounded-xl bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#b00020]">Si cierras o recargas esta pestaña sin guardar la llave, no podrás recuperar los datos originales.</p> : null}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[#e5e5e5]">
-                      <th className="py-2 pr-4 text-left font-semibold text-[#222222]">Etiqueta</th>
-                      <th className="py-2 pr-4 text-left font-semibold text-[#222222]">Dato original</th>
-                      <th className="py-2 pr-4 text-left font-semibold text-[#222222]">Rango / Hint</th>
-                      <th className="py-2 text-left font-semibold text-[#222222]">Categoría</th>
-                    </tr>
-                  </thead>
+                  <caption className="sr-only">Equivalencias entre etiquetas y datos originales</caption>
+                  <thead><tr className="border-b border-[#e5e5e5]">
+                    <th scope="col" className="py-2 pr-4 text-left font-semibold text-[#222222]">Etiqueta</th>
+                    <th scope="col" className="py-2 pr-4 text-left font-semibold text-[#222222]">Dato original</th>
+                    <th scope="col" className="py-2 pr-4 text-left font-semibold text-[#222222]">Veces</th>
+                    <th scope="col" className="py-2 text-left font-semibold text-[#222222]">Categoría</th>
+                  </tr></thead>
                   <tbody>
                     {result.reps.map((r, i) => {
                       const cat = allCats.find(c => c.id === r.catId);
                       return (
                         <tr key={i} className="border-b border-[#e5e5e5] last:border-0">
-                          <td className="py-2 pr-4">
-                            <mark className="anon font-mono text-xs px-1.5 py-0.5 rounded"
-                              style={{ backgroundColor: cat ? cat.bg : '#f5f5f5', color: cat ? cat.color : '#333', border: '1px solid ' + (cat ? cat.border : '#e5e5e5') }}>
-                              {r.replacement}
-                            </mark>
-                          </td>
-                          <td className="py-2 pr-4 font-mono text-xs text-[#333333] break-all">{r.original}</td>
-                          <td className="py-2 pr-4 text-xs text-[#757575]">{r.hint || '—'}</td>
-                          <td className="py-2 text-xs text-[#757575]">{r.catLabel}</td>
+                          <td className="py-2 pr-4"><mark className="anon font-mono text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: cat ? cat.bg : '#f5f5f5', color: cat ? cat.color : '#333', border: '1.5px solid ' + (cat ? cat.color : '#9a9a9a') }}>{r.replacement}</mark></td>
+                          <td className="py-2 pr-4 font-mono text-xs text-[#333333] break-all">{r.original}{r.valid === true ? <span className="ml-1 text-[#15803d]" title="Dígito verificador válido">✓</span> : r.valid === false ? <span className="ml-1 text-[#b45309]" title="Formato reconocido, verificador no válido">?</span> : null}</td>
+                          <td className="py-2 pr-4 text-xs text-[#6b6b6b]">{r.count || 1}</td>
+                          <td className="py-2 text-xs text-[#6b6b6b]">{r.catLabel}{r.hint ? ' · rango ' + r.hint : ''}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
-            </div>
+            </section>
           ) : null}
         </div>
       ) : null}
 
-      {/* Estado vacío */}
       {!result && !inputText ? (
         <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-10 text-center">
-          <div className="text-4xl mb-3">🔒</div>
-          <p className="text-lg font-semibold text-[#222222] mb-1">Tu texto anonimizado aparecerá aquí</p>
-          <p className="text-sm text-[#757575] mb-4">Pega texto directamente o elige una plantilla de 50 tipos de documentos reales.</p>
-          <AppButton variant="secondary" onClick={() => setShowTemplates(true)}>📋 Ver plantillas de ejemplo</AppButton>
-        </div>
-      ) : null}
-
-      {/* Visor de documento, también disponible desde esta pestaña */}
-      {viewerOpen && viewerData ? (
-        <DocumentViewer
-          open={viewerOpen}
-          onClose={() => setViewerOpen(false)}
-          reviewed={reviewed}
-          onReview={setReviewed}
-          resultIdentity={viewerData.generation}
-          anonText={viewerData.anonText}
-          reps={viewerData.reps}
-          cats={viewerData.cats}
-          activeCats={viewerData.activeCats}
-          fileName={viewerData.fileName}
-          originalLen={viewerData.originalLen}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-// ─── Pestaña Documento ────────────────────────────────────────────────────────
-function DocumentTab({ setLastResult }) {
-  const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
-  const [customTerms, setCustomTerms] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState('');
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerData, setViewerData] = useState(null);
-  const viewerGeneration = useRef(0);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const activeCats = cats.filter(c => c.on);
-  const allCats = [...cats, CUSTOM_CAT];
-  const hasCustomTerms = customTerms.trim().split('\n').some(t => t.trim().length >= 2);
-
-  const toggleCat = (id) => {
-    const cat = CATS.find(c => c.id === id);
-    if (cat && cat.alwaysOn) return;
-    setCats(prev => prev.map(c => c.id === id ? Object.assign({}, c, { on: !c.on }) : c));
-  };
-
-  const processFile = async (file) => {
-    if (!file) return;
-    setUploading(true);
-    setUploadMsg('Procesando archivo…');
-    setUploadedFile(null);
-    try {
-      const text = await extractTextFromFile(file, msg => setUploadMsg(msg));
-      if (!text.trim()) throw new Error('No se pudo extraer texto. ¿Es un PDF escaneado o está protegido con contraseña?');
-      setUploadedFile({ name: file.name, text });
-      setUploadMsg('');
-    } catch (err) {
-      setUploadMsg('');
-      alert('Error al leer el archivo:\n' + err.message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (file) processFile(file);
-  };
-
-  const anonymizeAndOpen = () => {
-    if (!uploadedFile) return;
-    if (activeCats.length === 0 && !hasCustomTerms) return;
-    const r = runAnonymize(uploadedFile.text, activeCats, customTerms);
-    setLastResult(r);
-    const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
-    setViewerData({
-      generation: ++viewerGeneration.current,
-      anonText: r.out,
-      reps: r.reps,
-      cats: allCats,
-      activeCats: effectiveActiveCats,
-      fileName: uploadedFile.name,
-      originalLen: uploadedFile.text.length,
-    });
-    setViewerOpen(true);
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Zona de carga */}
-      <div
-        className={cn(
-          'rounded-[28px] border-2 border-dashed transition-all cursor-pointer select-none',
-          dragOver ? 'border-[#b00020] bg-[#fff5f6]' : 'border-[#e5e5e5] bg-white hover:border-[#b00020]/40 hover:bg-[#fff5f6]/50'
-        )}
-        onClick={() => !uploading && fileInputRef.current && fileInputRef.current.click()}
-        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        role="button"
-        aria-label="Zona de carga de documentos"
-      >
-        <div className="flex flex-col items-center justify-center gap-3 py-12">
-          <span className="text-5xl">{uploading ? '⏳' : uploadedFile ? '📄' : '📂'}</span>
-          {uploading ? (
-            <div className="text-center">
-              <p className="font-semibold text-[#222222]">Procesando documento…</p>
-              <p className="mt-1 text-sm text-[#757575]">{uploadMsg}</p>
-            </div>
-          ) : uploadedFile ? (
-            <div className="text-center">
-              <p className="font-semibold text-[#222222]">{uploadedFile.name}</p>
-              <p className="mt-1 text-sm text-[#757575]">{uploadedFile.text.length.toLocaleString()} caracteres extraídos · Haz clic para cambiar el archivo</p>
-            </div>
-          ) : (
-            <div className="text-center">
-              <p className="font-semibold text-[#222222]">Arrastra tu documento aquí o haz clic para seleccionarlo</p>
-              <p className="mt-1 text-sm text-[#757575]">PDF, DOCX, TXT, CSV · Procesamiento 100% local</p>
-              <p className="mt-0.5 text-xs text-[#aaaaaa]">Hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas · documentos de varias páginas admitidos</p>
-            </div>
-          )}
-        </div>
-      </div>
-      <input ref={fileInputRef} type="file" accept=".txt,.csv,.pdf,.doc,.docx" className="hidden"
-        onChange={e => { processFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
-
-      {/* Categorías */}
-      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <div className="mb-4 flex items-center gap-2">
-          <h3 className="font-bold text-[#222222]">Categorías de detección</h3>
-          <InfoIcon text="Las credenciales siempre están activas. Activa las demás según tu caso de uso." />
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {cats.map(c => (
-            <button key={c.id} onClick={() => toggleCat(c.id)} aria-pressed={c.on} disabled={c.alwaysOn}
-              className={cn('flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm font-semibold transition text-left',
-                c.alwaysOn ? 'border-[#fecaca] bg-[#fef2f2] text-[#dc2626] cursor-default'
-                  : c.on ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]'
-                  : 'border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]')}>
-              {c.alwaysOn ? <span className="text-xs">🔒</span> : <span className={cn('h-2 w-2 shrink-0 rounded-full', c.on ? 'bg-[#b00020]' : 'bg-[#e5e5e5]')} />}
-              <span className="truncate">{c.label}</span>
-            </button>
-          ))}
-        </div>
-        {/* Términos personalizados */}
-        <div className="mt-5 pt-5 border-t border-[#e5e5e5]">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-semibold text-[#222222]">Términos personalizados</span>
-            <InfoIcon text="Escribe aquí nombres propios, siglas internas, códigos de proyecto, o cualquier término que quieras anonimizar y que no cubre ninguna categoría. Un término por línea. Se detectan sin distinción de mayúsculas y se reemplazan por [PERSONALIZADO_N]." />
+          <div className="text-4xl mb-3" aria-hidden="true">🔒</div>
+          <p className="text-lg font-semibold text-[#222222] mb-1">Antes de pegar información de tu empresa en una IA, pásala por aquí</p>
+          <p className="text-sm text-[#6b6b6b] mb-4">Nombres, identificaciones, teléfonos, cuentas y credenciales se sustituyen por etiquetas reversibles. Nada sale de tu navegador.</p>
+          <div className="flex justify-center gap-2 flex-wrap">
+            <AppButton onClick={trySample}>Probar con un ejemplo</AppButton>
+            <AppButton variant="secondary" onClick={() => setShowTemplates(true)}>📋 Plantillas por área</AppButton>
           </div>
-          <textarea
-            className="w-full rounded-2xl border border-[#e5e5e5] bg-white p-3 font-mono text-sm text-[#222222] outline-none transition resize-y"
-            onFocus={e => e.target.style.borderColor = '#b00020'}
-            onBlur={e => e.target.style.borderColor = '#e5e5e5'}
-            rows={15}
-            value={customTerms}
-            onChange={e => setCustomTerms(e.target.value)}
-            placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ\n(un término por línea)"}
-            aria-label="Términos personalizados para anonimizar"
-          />
-          <p className="mt-1.5 text-xs text-[#757575]">Un término por línea · Detección sin distinción de mayúsculas · Mínimo 2 caracteres por término</p>
         </div>
-      </div>
+      ) : null}
 
-      {/* Botón anonimizar */}
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-[#757575]">El documento anonimizado se mostrará en un visor antes de descargar o imprimir.</p>
-        <AppButton onClick={anonymizeAndOpen} disabled={!uploadedFile || (activeCats.length === 0 && !hasCustomTerms) || uploading}>
-          🔒 Anonimizar y ver
-        </AppButton>
-      </div>
-
-      {/* Visor */}
       {viewerOpen && viewerData ? (
-        <DocumentViewer
-          open={viewerOpen}
-          onClose={() => setViewerOpen(false)}
-          resultIdentity={viewerData.generation}
-          anonText={viewerData.anonText}
-          reps={viewerData.reps}
-          cats={viewerData.cats}
-          activeCats={viewerData.activeCats}
-          fileName={viewerData.fileName}
-          originalLen={viewerData.originalLen}
-        />
+        <DocumentViewer open={viewerOpen} onClose={() => setViewerOpen(false)} reviewed={reviewed} onReview={setReviewed} resultIdentity={viewerData.generation}
+          anonText={viewerData.anonText} reps={viewerData.reps} cats={viewerData.cats} activeCats={viewerData.activeCats} fileName={viewerData.fileName} originalLen={viewerData.originalLen} whitelist={whitelist} />
       ) : null}
     </div>
   );
@@ -2929,176 +3070,132 @@ function DocumentTab({ setLastResult }) {
 
 // ─── Pestaña Recuperar ────────────────────────────────────────────────────────
 function RecoverTab({ lastResult }) {
+  const dialogs = useDialog();
   const [mode, setMode] = useState(lastResult ? 'auto' : 'paste');
   const [mappingText, setMappingText] = useState('');
   const [modifiedText, setModifiedText] = useState('');
   const [recovered, setRecovered] = useState(null);
   const [copiedRecover, setCopiedRecover] = useState(false);
+  const [status, setStatus] = useState('');
+  const keyInputRef = useRef(null);
 
   const buildMapping = () => {
-    if (mode === 'auto' && lastResult && lastResult.reps) {
-      const map = {};
-      for (const r of lastResult.reps) map[r.replacement] = r.original;
-      return map;
-    } else if (mode === 'paste' && mappingText.trim()) {
-      return parseEquivalences(mappingText);
-    }
+    if (mode === 'auto' && lastResult && lastResult.reps) { const map = {}; for (const r of lastResult.reps) map[r.replacement] = r.original; return map; }
+    if (mode === 'paste' && mappingText.trim()) return parseEquivalences(mappingText);
     return {};
   };
 
+  const loadKeyFile = async (file) => {
+    if (!file) return;
+    try { const text = await file.text(); setMappingText(text.replace(/^\uFEFF/, '')); setMode('paste'); setRecovered(null); setStatus('Llave cargada: ' + file.name); }
+    catch (e) { dialogs.alert('No se pudo leer el archivo de llave.'); }
+  };
+
   const recover = () => {
-    if (!modifiedText.trim()) { alert('Pega el texto modificado por el LLM.'); return; }
+    if (!modifiedText.trim()) { dialogs.alert('Pega la respuesta de la IA.'); return; }
     let mapping;
     try { mapping = buildMapping(); }
-    catch (error) { setRecovered(null); alert('No se pudo leer la tabla de equivalencias. ' + error.message); return; }
-    if (!Object.keys(mapping).length) {
-      alert('No hay mapeo disponible. Cambia a "Pegar tabla" y pega la tabla de equivalencias.');
-      return;
-    }
-    const tagPattern = /\[[A-Z_]+_\d+\]/g;
-    const found = [...new Set(modifiedText.match(tagPattern) || [])];
-    const resolved = [];
-    const unresolved = [];
-    let out = modifiedText;
-    for (const tag of found) {
-      if (mapping[tag] !== undefined) {
-        out = out.split(tag).join(mapping[tag]);
-        resolved.push({ tag, value: mapping[tag] });
-      } else {
-        unresolved.push(tag);
-      }
-    }
-    setRecovered({ out, resolved, unresolved });
+    catch (error) { setRecovered(null); dialogs.alert(error.message, 'No se pudo leer la llave'); return; }
+    if (!Object.keys(mapping).length) { dialogs.alert('No hay llave disponible. Carga el archivo de llave o pega la tabla de equivalencias.'); return; }
+    const res = restoreTags(modifiedText, mapping);
+    setRecovered(res);
+    setStatus(res.resolved.length + ' etiquetas restauradas' + (res.repaired.length ? ', ' + res.repaired.length + ' reparadas' : '') + (res.unresolved.length ? ', ' + res.unresolved.length + ' sin resolver' : '') + '.');
   };
 
   const copyRecovered = () => {
     if (!recovered) return;
-    copyLocalText(recovered.out).then(ok => {
-      if (!ok) return;
-      setCopiedRecover(true);
-      setTimeout(() => setCopiedRecover(false), 2000);
-    });
+    copyLocalText(recovered.out, m => dialogs.alert(m)).then(ok => { if (!ok) return; setCopiedRecover(true); setTimeout(() => setCopiedRecover(false), 2000); });
   };
 
   const hasMappingSource = (mode === 'auto' && lastResult) || (mode === 'paste' && mappingText.trim());
+  const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-[#fafafa] p-3 text-base sm:text-sm text-[#333333] focus:outline-none focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-y";
+
+  // Resaltar los valores restaurados en el texto recuperado.
+  const highlighted = useMemo(() => {
+    if (!recovered) return null;
+    const values = [...new Set(recovered.resolved.map(r => r.value).filter(Boolean))].sort((a, b) => b.length - a.length);
+    if (!values.length) return [recovered.out];
+    const re = new RegExp('(' + values.map(escapeRegExp).join('|') + ')', 'g');
+    return recovered.out.split(re);
+  }, [recovered]);
+  const restoredSet = useMemo(() => new Set(recovered ? recovered.resolved.map(r => r.value) : []), [recovered]);
 
   return (
     <div className="space-y-6">
+      <LiveStatus message={status} />
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <h2 className="text-xl font-bold text-[#222222] mb-1">Recuperar texto original</h2>
-        <p className="text-sm text-[#757575]">
-          Devuelve el texto a su forma original después de que el LLM lo procesó, reemplazando cada etiqueta <span className="font-mono">[TAG_N]</span> por el dato real correspondiente.
-        </p>
+        <h2 className="text-xl font-bold text-[#222222] mb-1">Recuperar los datos originales</h2>
+        <p className="text-sm text-[#6b6b6b]">Pega la respuesta de la IA y la app devuelve cada etiqueta <span className="font-mono">[TAG_N]</span> a su dato real. Tolera etiquetas alteradas por el modelo (<span className="font-mono">[PERSONA 1]</span>, <span className="font-mono">PERSONA_1</span>, <span className="font-mono">[PERSON_1]</span>, negritas).</p>
       </div>
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[#757575] mb-3">Fuente del mapeo</p>
-        <div className="mb-4 flex gap-3">
-          <button
-            onClick={() => { setMode('auto'); setRecovered(null); }}
-            className={cn("flex-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left",
-              mode === 'auto'
-                ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]"
-                : "border-[#e5e5e5] text-[#333333] hover:bg-[#fafafa]"
-            )}
-          >
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b6b6b] mb-3" id="key-source">Fuente de la llave</p>
+        <div className="mb-4 flex gap-3 flex-wrap" role="group" aria-labelledby="key-source">
+          <button type="button" onClick={() => { setMode('auto'); setRecovered(null); }} aria-pressed={mode === 'auto'}
+            className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'auto' ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
             <div className="font-bold mb-0.5">⚡ Sesión actual</div>
-            <div className={cn("text-xs font-normal", mode === 'auto' ? 'text-[#b00020]' : 'text-[#757575]')}>
-              {lastResult
-                ? lastResult.reps.length + ' etiquetas disponibles de la última anonimización'
-                : 'Anonimiza primero en la pestaña Texto'}
-            </div>
+            <div className={cn("text-xs font-normal", mode === 'auto' ? 'text-[#b00020]' : 'text-[#6b6b6b]')}>{lastResult ? lastResult.reps.length + ' etiquetas de la última sustitución' : 'Todavía no has procesado nada en esta sesión'}</div>
           </button>
-          <button
-            onClick={() => { setMode('paste'); setRecovered(null); }}
-            className={cn("flex-1 rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left",
-              mode === 'paste'
-                ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]"
-                : "border-[#e5e5e5] text-[#333333] hover:bg-[#fafafa]"
-            )}
-          >
-            <div className="font-bold mb-0.5">📋 Pegar tabla</div>
-            <div className={cn("text-xs font-normal", mode === 'paste' ? 'text-[#b00020]' : 'text-[#757575]')}>
-              Sesiones distintas: copia la tabla del .doc descargado y pégala aquí
-            </div>
+          <button type="button" onClick={() => { setMode('paste'); setRecovered(null); }} aria-pressed={mode === 'paste'}
+            className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'paste' ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
+            <div className="font-bold mb-0.5">🔑 Archivo o tabla de llave</div>
+            <div className={cn("text-xs font-normal", mode === 'paste' ? 'text-[#b00020]' : 'text-[#6b6b6b]')}>Otra sesión: carga la llave .tsv o pega la tabla del respaldo .doc</div>
           </button>
         </div>
-
         {mode === 'paste' && (
           <div>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-sm font-semibold text-[#222222]">Tabla de equivalencias</span>
-              <InfoIcon text="En Word: selecciona toda la tabla de equivalencias → Copiar → pega aquí. También funciona con el botón '📋 Copiar' de la tabla en la pestaña Texto." />
+            <div className="mb-2 flex items-center gap-2 flex-wrap">
+              <label htmlFor="mapping-text" className="text-sm font-semibold text-[#222222]">Llave de recuperación</label>
+              <InfoIcon text="Carga el archivo LLAVE-CONFIDENCIAL… .tsv, o en Word selecciona la tabla de equivalencias del respaldo → Copiar → pega aquí, incluido el encabezado." />
+              <AppButton variant="secondary" onClick={() => keyInputRef.current && keyInputRef.current.click()}>↑ Cargar archivo de llave</AppButton>
+              <input ref={keyInputRef} type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain" className="hidden" aria-label="Seleccionar archivo de llave" onChange={e => { loadKeyFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
             </div>
-            <textarea
-              rows={10}
-              value={mappingText}
-              onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
-              className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 font-mono text-xs text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
-              placeholder={"Etiqueta\tOriginal (JSON)\tHint\tCategoría\n[EMAIL_1]\t\"maria@empresa.com\"\t—\tCorreos electrónicos\n[TELEFONO_1]\t\"+52 55 4321 0987\"\t—\tTeléfonos"}
-            />
-            <p className="mt-1.5 text-xs text-[#757575]">
-              En Word: selecciona la tabla → Copiar → pega aquí · O usa "📋 Copiar" de la tabla en la pestaña Texto
-            </p>
+            <textarea id="mapping-text" rows={8} value={mappingText} onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
+              className={cn(fieldClass, 'font-mono')} placeholder={"Etiqueta\tOriginal (JSON)\tHint\tCategoría\n[EMAIL_1]\t\"maria@empresa.com\"\t—\tCorreos electrónicos"} />
           </div>
         )}
       </div>
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
         <div className="mb-2 flex items-center gap-2">
-          <span className="text-sm font-semibold text-[#222222]">Texto modificado por el LLM</span>
-          <InfoIcon text="Pega aquí el texto que te devolvió ChatGPT, Claude u otro modelo. Las etiquetas [TAG_N] serán reemplazadas por los datos originales." />
+          <label htmlFor="modified-text" className="text-sm font-semibold text-[#222222]">Respuesta de la IA</label>
+          <InfoIcon text="Pega aquí el texto que te devolvió ChatGPT, Claude, Gemini u otro modelo. Las etiquetas se sustituirán por los datos originales." />
         </div>
-        <textarea
-          rows={18}
-          value={modifiedText}
-          onChange={e => { setModifiedText(e.target.value); setRecovered(null); }}
-          className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 text-sm text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
-          placeholder="Pega aquí el texto que te devolvió el LLM. Las etiquetas [EMAIL_1], [TELEFONO_1], etc. serán reemplazadas por los datos originales."
-        />
-        <div className="mt-3">
-          <AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>
-            🔄 Recuperar texto original
-          </AppButton>
-        </div>
+        <textarea id="modified-text" rows={12} value={modifiedText} onChange={e => { setModifiedText(e.target.value); setRecovered(null); }} className={fieldClass}
+          placeholder="Pega aquí la respuesta del modelo con las etiquetas [EMAIL_1], [TELEFONO_1], etc." />
+        <div className="mt-3"><AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>🔄 Recuperar datos originales</AppButton></div>
       </div>
 
       {recovered ? (
         <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6 space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
-            {recovered.resolved.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0fdf4] border border-[#bbf7d0] px-3 py-1.5 text-sm font-semibold text-[#16a34a]">
-                ✓ {recovered.resolved.length} etiqueta{recovered.resolved.length !== 1 ? 's' : ''} restaurada{recovered.resolved.length !== 1 ? 's' : ''}
-              </span>
-            )}
-            {recovered.unresolved.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#fffbeb] border border-[#fcd34d] px-3 py-1.5 text-sm font-semibold text-[#d97706]">
-                ⚠ {recovered.unresolved.length} sin resolver
-              </span>
-            )}
-            {recovered.resolved.length === 0 && recovered.unresolved.length === 0 && (
-              <span className="text-sm text-[#757575]">No se encontraron etiquetas [TAG_N] en el texto.</span>
-            )}
+            {recovered.resolved.length > 0 && <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0fdf4] border border-[#15803d] px-3 py-1.5 text-sm font-semibold text-[#15803d]">✓ {recovered.resolved.length} etiqueta{recovered.resolved.length !== 1 ? 's' : ''} restaurada{recovered.resolved.length !== 1 ? 's' : ''}</span>}
+            {recovered.repaired.length > 0 && <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#eff6ff] border border-[#1d4ed8] px-3 py-1.5 text-sm font-semibold text-[#1d4ed8]">🔧 {recovered.repaired.length} etiqueta{recovered.repaired.length !== 1 ? 's' : ''} reparada{recovered.repaired.length !== 1 ? 's' : ''} (el modelo las alteró)</span>}
+            {recovered.unresolved.length > 0 && <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#fffbeb] border border-[#b45309] px-3 py-1.5 text-sm font-semibold text-[#b45309]">⚠ {recovered.unresolved.length} sin resolver</span>}
+            {recovered.resolved.length === 0 && recovered.unresolved.length === 0 && <span className="text-sm text-[#6b6b6b]">No se encontraron etiquetas en el texto.</span>}
           </div>
-
           <div>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-[#222222]">Texto recuperado</span>
-              <AppButton variant="secondary" onClick={copyRecovered}>
-                {copiedRecover ? '✓ Copiado' : '📋 Copiar'}
-              </AppButton>
+              <AppButton variant="secondary" onClick={copyRecovered}>{copiedRecover ? '✓ Copiado' : '📋 Copiar'}</AppButton>
             </div>
             <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 max-h-96 overflow-y-auto">
-              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[#222222]">{recovered.out}</pre>
+              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[#222222]">
+                {highlighted.map((part, i) => restoredSet.has(part) ? <mark key={i} className="rounded bg-[#dcfce7] px-0.5 text-[#14532d]">{part}</mark> : <span key={i}>{part}</span>)}
+              </pre>
             </div>
+            <p className="mt-1.5 text-xs text-[#6b6b6b]">Los valores restaurados aparecen resaltados para que compruebes que cayeron en el lugar correcto.</p>
           </div>
-
+          {recovered.repaired.length > 0 && (
+            <details className="rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] p-4 text-sm text-[#1e3a8a]">
+              <summary className="cursor-pointer font-semibold">Etiquetas reparadas</summary>
+              <ul className="mt-2 space-y-1 font-mono text-xs">{recovered.repaired.map((r, i) => <li key={i}>{r.found} → {r.tag}</li>)}</ul>
+            </details>
+          )}
           {recovered.unresolved.length > 0 && (
-            <div className="rounded-2xl border border-[#fcd34d] bg-[#fffbeb] p-4 text-sm text-[#92400e]">
+            <div className="rounded-2xl border border-[#b45309] bg-[#fffbeb] p-4 text-sm text-[#92400e]">
               <strong>Etiquetas sin resolver:</strong> {recovered.unresolved.join(', ')}
-              <span className="block mt-1 text-xs">
-                Estas etiquetas no estaban en la tabla de equivalencias. Puede que correspondan a otra anonimización o que la tabla esté incompleta.
-              </span>
+              <span className="block mt-1 text-xs">No estaban en la llave. Puede que correspondan a otra sustitución o que la llave esté incompleta.</span>
             </div>
           )}
         </div>
@@ -3109,75 +3206,89 @@ function RecoverTab({ lastResult }) {
 
 // ─── App principal ────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'how', label: 'Cómo usar' },
-  { id: 'texto', label: 'Texto' },
-  { id: 'doc', label: 'Documento' },
+  { id: 'work', label: '🔒 Ocultar datos' },
   { id: 'recover', label: '🔄 Recuperar' },
+  { id: 'how', label: 'Cómo usar' },
   { id: 'privacy', label: 'Privacidad' },
 ];
 
 function App() {
-  const [tab, setTab] = useState('how');
+  const [tab, setTab] = useState('work');
   const [aboutOpen, setAboutOpen] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [sessionKey, setSessionKey] = useState(0);
-  const clearSession = () => {
-    if (!window.confirm('¿Borrar el contenido y las equivalencias de esta sesión? No elimina archivos descargados ni el portapapeles.')) return;
-    setLastResult(null);
-    setSessionKey(key => key + 1);
-    setTab('how');
-    setAboutOpen(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const dialogs = useDialog();
+  const clearSession = async () => {
+    if (!(await dialogs.confirm('¿Borrar el contenido y la llave de esta sesión? No elimina archivos descargados ni el portapapeles.', { ok: 'Borrar sesión', danger: true }))) return;
+    setLastResult(null); setSessionKey(key => key + 1); setTab('work'); setAboutOpen(false); setMenuOpen(false);
+  };
+  const tabRefs = useRef([]);
+  // Header y nav en un solo bloque sticky: así ninguna pestaña se dibuja sobre el contenido al variar la altura del header.
+  const onTabKey = (e, i) => {
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const n = TABS.length;
+    const next = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : n - 1;
+    setTab(TABS[next].id); tabRefs.current[next] && tabRefs.current[next].focus();
   };
 
   return (
     <div className="min-h-screen bg-white">
-      <header className="sticky top-0 z-40 border-b border-[#e5e5e5] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#b00020] text-lg font-bold text-white select-none">F</div>
-            <div>
-              <div className="flex items-center gap-2">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[80] focus:rounded-xl focus:bg-[#b00020] focus:px-4 focus:py-2 focus:text-white">Saltar al contenido</a>
+      <div className="sticky top-0 z-40 bg-white">
+      <header className="border-b border-[#e5e5e5]">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#b00020] text-lg font-bold text-white select-none" aria-hidden="true">F</div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-lg font-bold tracking-tight text-[#222222]">FuturIA</span>
-                <span className="text-sm font-semibold text-[#757575]">Anonimizador IA</span>
+                <span className="text-sm font-semibold text-[#6b6b6b]">Anonimizador IA</span>
               </div>
-              <p className="text-xs text-[#757575]">Protege datos sensibles antes de usar modelos de IA — 100% local</p>
+              <p className="hidden text-xs text-[#6b6b6b] sm:block">Oculta datos sensibles antes de usar ChatGPT, Claude o Gemini — gratis y 100% local</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 sm:flex">
             <AppButton variant="secondary" onClick={clearSession}>Borrar sesión</AppButton>
             <AppButton variant="secondary" onClick={() => setAboutOpen(true)}>Acerca de</AppButton>
-            <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer">
-              <AppButton>Únete a FuturIA →</AppButton>
-            </a>
+          </div>
+          <div className="relative sm:hidden">
+            <button type="button" aria-expanded={menuOpen} aria-haspopup="menu" aria-label="Menú" onClick={() => setMenuOpen(v => !v)}
+              className="min-h-[44px] min-w-[44px] rounded-2xl border border-[#9a9a9a] px-3 text-lg">☰</button>
+            {menuOpen ? (
+              <div role="menu" className="absolute right-0 top-12 z-50 w-48 rounded-2xl border border-[#9a9a9a] bg-white p-2 shadow-xl">
+                <button role="menuitem" type="button" onClick={clearSession} className="block min-h-[44px] w-full rounded-xl px-3 text-left text-sm font-semibold hover:bg-[#fff5f6]">Borrar sesión</button>
+                <button role="menuitem" type="button" onClick={() => { setAboutOpen(true); setMenuOpen(false); }} className="block min-h-[44px] w-full rounded-xl px-3 text-left text-sm font-semibold hover:bg-[#fff5f6]">Acerca de</button>
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
 
-      <nav className="sticky top-[72px] z-30 border-b border-[#e5e5e5] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-1 overflow-x-auto px-5 py-2">
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              aria-current={tab === t.id ? 'page' : undefined}
-              className={cn("shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition",
-                tab === t.id
-                  ? "bg-[#fff5f6] text-[#b00020] border border-[#b00020]"
-                  : "text-[#333333] hover:bg-[#fff5f6]")}>
+      <nav className="border-b border-[#e5e5e5]" aria-label="Secciones">
+        <div className="mx-auto flex max-w-7xl items-center gap-1 overflow-x-auto px-5 py-2" role="tablist">
+          {TABS.map((t, i) => (
+            <button key={t.id} ref={el => tabRefs.current[i] = el} role="tab" id={'tab-' + t.id} aria-selected={tab === t.id} aria-controls={'panel-' + t.id} tabIndex={tab === t.id ? 0 : -1}
+              onClick={() => setTab(t.id)} onKeyDown={e => onTabKey(e, i)}
+              className={cn("min-h-[44px] shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]",
+                tab === t.id ? "bg-[#fff5f6] text-[#b00020] border border-[#b00020]" : "text-[#333333] hover:bg-[#fff5f6]")}>
               {t.label}
             </button>
           ))}
         </div>
       </nav>
+      </div>
 
-      <main key={sessionKey} className="mx-auto max-w-7xl px-5 py-8">
-        {tab === 'how' ? <HowToTab /> : null}
-        {tab === 'texto' ? <AnonTab setLastResult={setLastResult} /> : null}
-        {tab === 'doc' ? <DocumentTab setLastResult={setLastResult} /> : null}
+      <main id="main" key={sessionKey} tabIndex={-1} className="mx-auto max-w-7xl px-5 py-8 outline-none" role="tabpanel" aria-labelledby={'tab-' + tab}>
+        {tab === 'work' ? <WorkTab setLastResult={setLastResult} lastResult={lastResult} /> : null}
         {tab === 'recover' ? <RecoverTab lastResult={lastResult} /> : null}
+        {tab === 'how' ? <HowToTab onStart={() => setTab('work')} /> : null}
         {tab === 'privacy' ? <PrivacyTab /> : null}
       </main>
 
-      <footer className="border-t border-[#e5e5e5] py-6 text-center text-xs text-[#757575]">
-        FuturIA Anonimizador IA — Procesamiento local del contenido. Sin historial automático. Requiere revisión manual.
+      <footer className="border-t border-[#e5e5e5] py-6 text-center text-xs text-[#6b6b6b]">
+        FuturIA Anonimizador IA v{APP_VERSION} — gratuito · procesamiento local · sin historial · seudonimización reversible que requiere revisión manual.
         {' · '}
         <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer" className="text-[#b00020] hover:underline">futuria.substack.com</a>
       </footer>
@@ -3187,7 +3298,7 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')).render(<DialogProvider><App /></DialogProvider>);
 </script>
 </body>
 </html>

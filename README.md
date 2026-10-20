@@ -1,11 +1,12 @@
 # Anonimizador IA — FuturIA (App 7)
 
-> **Verificación ampliada (2026-10-13): 135/135 sin fallos.** Los contrajemplos de la revisión inicial ya se corrigieron y forman parte de las regresiones: credenciales con signos y escapes, unión de intervalos solapados, revisión por generación de resultado, servidor con versión y protecciones comprobadas, mapas JSON/TSV y Ctrl+P. Pendiente el dictamen de revisión final antes del commit. No se realizó deploy público en esta tanda.
+> **Fase 0 (2026-10-20): 201/201 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
 
-Detecta y reemplaza datos sensibles en un texto **antes** de pegarlo en ChatGPT,
+Oculta datos sensibles de la información de tu empresa **antes** de pegarla en ChatGPT,
 Claude, Gemini o cualquier otro modelo. El reemplazo es reversible: cada dato
 original queda mapeado a una etiqueta (`[EMAIL_1]`, `[CREDENCIAL_1]`) y la
 pestaña Recuperar devuelve el texto a su forma original con la respuesta del modelo.
+Es gratuita, sin cuenta ni pago, y lo seguirá siendo.
 
 **El procesamiento del texto es 100% local**: ocurre en el navegador y no genera
 ninguna petición de red. Lo que sí requiere internet es la carga inicial de la
@@ -16,9 +17,15 @@ app (React, Babel, Tailwind y la fuente desde CDN), así que sin conexión no ar
 Archivo único (`index.html`), sin build y sin backend. React se transpila en el
 navegador con Babel Standalone.
 
-- Categorías de detección con expresiones regulares + nombres por contexto + términos personalizados
-- Cobertura fiscal LATAM + EE. UU.: RFC, CURP, CUIT/CUIL, RUT, NIT, RIF, RUC, CPF/CNPJ, RTN, RNC, SSN/EIN
-- Revisión residual con los mismos patrones del motor. **Sin porcentajes de riesgo ni verde automático.** Copiar, descargar e imprimir exigen cero coincidencias pendientes y confirmación manual; esto no certifica anonimización completa.
+- Categorías de detección con expresiones regulares + nombres por contexto (minúsculas y MAYÚSCULAS, contextos de empresa y en inglés, «Nombre, C.C. 123») + términos personalizados + **lista blanca** de lo que nunca se oculta.
+- **La misma entidad recibe siempre la misma etiqueta** (`María García`, `MARIA GARCIA` → `[PERSONA_1]`); la tabla indica cuántas veces aparece.
+- Identificación personal y fiscal de **toda Hispanoamérica + EE. UU.** con dígito verificador donde existe (cédula/RUC EC, RUT CL, CUIT/CBU AR, NIT CO, CURP/RFC/CLABE MX, RUC PE, CI UY, DUI SV, CPF/CNPJ BR; Luhn e IBAN) y formatos de PA, CR, HN, NI, GT, DO, VE, PY, BO; pasaporte con contexto. Un número sin verificador ni formato nacional necesita palabra clave para no confundirse con pedidos o montos.
+- Teléfonos locales por país (con o sin contexto), montos en todas las monedas de la región, fechas largas/ISO y **fecha de nacimiento/edad** como categoría propia.
+- Revisión residual con los mismos patrones del motor. **Sin porcentajes de riesgo ni verde automático.** Solo bloquean las categorías activas; las desactivadas se muestran como aviso. Copiar, descargar e imprimir exigen cero pendientes y confirmación manual; esto no certifica anonimización completa.
+- Ajustes rápidos: «Predeterminado», «Identidad sí, cifras no» y «Máxima cobertura».
+- **Recuperación tolerante**: repara `[PERSONA 1]`, `PERSONA_1`, `[PERSON_1]`, minúsculas y negritas Markdown, e informa cuáles reparó y cuáles no resolvió; los valores restaurados se resaltan.
+- **Llave de recuperación** descargable (`LLAVE-CONFIDENCIAL-NO-SUBIR-A-IA_…tsv`), cargable en Recuperar; aviso antes de cerrar la pestaña si no se guardó.
+- «Copiar para la IA» añade una instrucción para que el modelo conserve las etiquetas.
 - 50 plantillas de ejemplo en 8 industrias, con auto-activación de categorías
 - Montos sustituidos por etiquetas; los rangos aproximados aparecen solo como pistas en la interfaz y deben revisarse.
 - Sin `localStorage`, `sessionStorage` ni `IndexedDB`: el mapeo vive solo en memoria
@@ -28,10 +35,12 @@ navegador con Babel Standalone.
 
 ## Carga de documentos
 
-Las pestañas Texto y Documento aceptan PDF, DOCX, TXT y CSV, **con varias
-páginas**: el PDF se recorre completo página por página mostrando el progreso.
-La pestaña Documento abre el resultado en un visor a página completa con aspecto
-de hoja impresa, con toggle «Con marcas / Sin marcas», imprimir y descargar.
+La vista «Ocultar datos» acepta texto pegado o PDF, DOCX, TXT y CSV (arrastrar o
+cargar), **con varias páginas**: el PDF se recorre completo página por página
+mostrando el progreso, y el texto extraído puede editarse antes de procesar.
+«Ver como documento» abre un visor a página completa con aspecto de hoja impresa,
+toggle «Con marcas / Sin marcas», imprimir/guardar PDF (sin pistas de rango, respetando
+«Sin marcas», vía iframe sin pop-ups) y descargar. En móvil el visor usa márgenes fluidos.
 
 Límites, declarados en la propia zona de carga y comprobados antes de leer el
 archivo: **25 MB y 300 páginas**. A partir de 40 páginas avisa de que tardará.
@@ -63,11 +72,12 @@ node pruebas/ejecutar-qa.mjs             # genera pruebas/qa-resumen.json
 node --test pruebas/test-seguridad.mjs pruebas/test-servidor.mjs
 node pruebas/sonda-seguridad.mjs
 node pruebas/sonda-app.mjs              # 28 · regresión general
+node pruebas/sonda-fase0.mjs            # 28 · Fase 0: flujo, diálogos, popovers, móvil
 node pruebas/sonda-correccion.mjs       # 12 · saltos de línea y límites de carga
 node pruebas/sonda-interfaz.mjs         # 18 · tamaños y ventana emergente
 ```
 
-**135 comprobaciones verificadas el 2026-10-13**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
+**201 comprobaciones verificadas el 2026-10-20**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
 pinneadas, Tailwind efectivamente aplicado, el flujo completo de anonimización,
 que ningún dato crudo quede en el bloque de salida, que la tabla de equivalencias
 sí conserve los originales (reversibilidad), que no haya peticiones a ningún

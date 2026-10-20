@@ -1,6 +1,8 @@
 // Verifica: (1) el .doc legado da un mensaje util en español en vez del error
 // tecnico de mammoth, (2) el .docx sigue funcionando, (3) el visor de documento
-// ya se abre tambien desde la pestana Texto.
+// se abre desde el resultado de la pestaña de trabajo ('🔎 Ver como documento').
+// Fase 0: la carga vive en la pestaña '🔒 Ocultar datos'; los avisos son
+// diálogos propios [role=alertdialog] (#dlg-msg) en lugar de alert().
 const CDP = 'http://127.0.0.1:9334';
 const URL_APP = 'http://localhost:5199/';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -25,32 +27,39 @@ async function main() {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const checks = [];
   const check = (n, ok, d) => checks.push({ n, ok: !!ok, d });
+  const FILE_INPUT = `document.querySelector('#input-text').closest('section').querySelector('input[type=file]')`;
+  const dialogMsg = () => ev(`document.querySelector('[role=alertdialog] #dlg-msg')?.innerText || ''`);
+  const acceptDialog = () => ev(`(()=>{const b=[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/Entendido|Continuar/.test(b.textContent));if(!b)return false;b.click();return true})()`);
 
   await send('Runtime.enable'); await send('Page.enable');
+  errs.length = 0;
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 950, deviceScaleFactor: 1, mobile: false });
 
-  async function subirDoc(archivo, nombre) {
+  async function irATrabajo() {
     await send('Page.navigate', { url: URL_APP });
     await sleep(8500);
-    await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>x.innerText.trim()==='Documento');b&&b.click();})()`);
-    await sleep(1600);
+    await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+    await sleep(1200);
+    await ev(`window.__nativeAlert=0;window.alert=()=>{window.__nativeAlert++};`);
+  }
+
+  async function subirDoc(archivo, nombre) {
+    await irATrabajo();
     const b64 = readFileSync(archivo).toString('base64');
-    await ev(`(()=>{window.__alert=null; window.alert=m=>{window.__alert=m;};})()`);
     await ev(`(()=>{
       const bin=atob(${JSON.stringify(b64)}); const a=new Uint8Array(bin.length);
       for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
       const f=new File([a],${JSON.stringify(nombre)});
-      const inp=document.querySelector('input[type=file]');
+      const inp=${FILE_INPUT};
       const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files;
       inp.dispatchEvent(new Event('change',{bubbles:true}));
     })()`);
     for (let i = 0; i < 20; i++) {
       await sleep(1100);
-      const t = String(await ev('document.body.innerText'));
-      const m = t.match(/([\d.]+)\s*caracteres extraídos/);
-      const al = await ev('window.__alert');
-      if (m) return { chars: parseInt(m[1].replace(/\./g, ''), 10), aviso: null };
-      if (al) return { chars: null, aviso: String(al) };
+      const chars = await ev(`(()=>{const ta=document.querySelector('#input-text');return ta&&new RegExp('Archivo: '+${JSON.stringify(nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))}).test(document.body.innerText)?ta.value.length:0})()`);
+      const al = String(await dialogMsg());
+      if (chars > 0) return { chars, aviso: null };
+      if (al) { await acceptDialog(); return { chars: null, aviso: al }; }
     }
     return { chars: null, aviso: null };
   }
@@ -60,6 +69,7 @@ async function main() {
   console.log('.doc legado ->', JSON.stringify(legado).slice(0, 300));
   const av = String(legado.aviso || '');
   check('el .doc legado se rechaza con aviso', !!legado.aviso, null);
+  check('el aviso es un diálogo propio, no alert() nativo', (await ev('window.__nativeAlert')) === 0, null);
   check('el aviso está en español, no es el error de mammoth', !/Could not find the body element/.test(av), null);
   check('el aviso identifica el formato antiguo de Word', /formato antiguo de Word \(97-2003\)/.test(av), null);
   check('el aviso explica cómo resolverlo (Guardar como .docx)', /Guardar como/.test(av) && /docx/.test(av), null);
@@ -72,48 +82,43 @@ async function main() {
   check('el .docx no genera aviso de error', !moderno.aviso, moderno.aviso ? String(moderno.aviso).slice(0, 80) : null);
 
   // --- 3) un archivo renombrado (txt con extension .docx) ---
-  await send('Page.navigate', { url: URL_APP });
-  await sleep(8500);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>x.innerText.trim()==='Documento');b&&b.click();})()`);
-  await sleep(1500);
-  const renombrado = await ev(`(async()=>{
-    window.__alert=null; window.alert=m=>{window.__alert=m;};
+  await irATrabajo();
+  await ev(`(()=>{
     const f=new File([new TextEncoder().encode('esto no es un docx')],'falso.docx');
-    const inp=document.querySelector('input[type=file]');
+    const inp=${FILE_INPUT};
     const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files;
     inp.dispatchEvent(new Event('change',{bubbles:true}));
-    await new Promise(r=>setTimeout(r,4000));
-    return window.__alert||'(sin aviso)';
   })()`);
-  check('un archivo renombrado a .docx se detecta', /no parece un documento de Word válido/.test(String(renombrado)), String(renombrado).slice(0, 90).replace(/\n/g, ' '));
+  let renombrado = '';
+  for (let i = 0; i < 12; i++) { await sleep(500); renombrado = String(await dialogMsg()); if (renombrado) break; }
+  check('un archivo renombrado a .docx se detecta', /no parece un documento de Word válido/.test(renombrado), (renombrado || '(sin aviso)').slice(0, 90).replace(/\n/g, ' '));
+  await acceptDialog(); await sleep(200);
 
-  // --- 4) visor desde la pestaña Texto ---
-  await send('Page.navigate', { url: URL_APP });
-  await sleep(8500);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>x.innerText.trim()==='Texto');b&&b.click();})()`);
-  await sleep(1600);
-  await ev(`(()=>{const tas=Array.from(document.querySelectorAll('textarea'));
-    const ta=tas.find(t=>/pega aqu/i.test(t.placeholder||''))||tas[tas.length-1];
+  // --- 4) visor desde el texto pegado (misma pestaña de trabajo) ---
+  await irATrabajo();
+  await ev(`(()=>{const ta=document.querySelector('#input-text');
     const s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
     s.call(ta,'Contacto maria.lopez@acmecorp.com, telefono +52 55 1234 5678, RFC GODE561231GR8, IP 192.168.14.22');
     ta.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-  await sleep(1200);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/^🔒 Anonimizar$|anonimizar/i.test(x.innerText.trim())&&!x.disabled);b&&b.click();})()`);
-  await sleep(3200);
+  await sleep(1000);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ocultar datos sensibles/.test(x.innerText.trim())&&!x.disabled);b&&b.click();})()`);
+  await sleep(2500);
 
   const hayBoton = await ev(`(()=>!!Array.from(document.querySelectorAll('button')).find(x=>/Ver como documento/i.test(x.innerText)))()`);
-  check('la pestaña Texto ofrece "Ver como documento"', hayBoton, null);
+  check('el resultado del texto pegado ofrece "🔎 Ver como documento"', hayBoton, null);
 
   await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ver como documento/i.test(x.innerText));b&&b.click();})()`);
   await sleep(2200);
   const vis = String(await ev('document.body.innerText'));
-  check('el visor se abre desde la pestaña Texto', /Con marcas|Sin marcas/i.test(vis), null);
-  check('el visor muestra el contenido anonimizado', /\[EMAIL_\d+\]/.test(vis), null);
-  check('el visor ofrece imprimir, texto sin mapa y respaldo separado', /Imprimir/i.test(vis) && /Descargar texto \.txt/i.test(vis) && /Respaldo confidencial \.doc/i.test(vis), null);
+  const visorAbierto = await ev(`!![...document.querySelectorAll('[role=dialog]')].find(x=>/^Documento seudonimizado/.test(x.getAttribute('aria-label')||''))`);
+  check('el visor se abre desde el texto pegado', visorAbierto && /Con marcas|Sin marcas/i.test(vis), null);
+  check('el visor muestra el contenido anonimizado', /\[EMAIL_\d+\]/.test(vis) && (await ev(`[...document.querySelectorAll('[role=dialog]')].find(x=>/^Documento seudonimizado/.test(x.getAttribute('aria-label')||''))?.querySelectorAll('mark').length`)) > 0, null);
+  check('el visor ofrece imprimir, texto sin mapa y respaldo separado', /Imprimir \/ Guardar PDF/i.test(vis) && /Descargar texto \.txt/i.test(vis) && /Respaldo confidencial \.doc/i.test(vis), null);
   check('sin excepciones en toda la prueba', errs.length === 0, errs.join(' | '));
 
   const r = await send('Page.captureScreenshot', { format: 'png' });
   if (r.result?.data) writeFileSync('pruebas/evidencia-visor-desde-texto.png', Buffer.from(r.result.data, 'base64'));
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>x.innerText.trim()==='← Cerrar');b&&b.click();})()`);
 
   const fail = checks.filter(c => !c.ok);
   console.log('\n=== .DOC LEGADO + VISOR DESDE TEXTO ===');
