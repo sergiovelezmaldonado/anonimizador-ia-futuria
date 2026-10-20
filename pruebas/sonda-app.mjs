@@ -1,5 +1,5 @@
 // Sonda CDP del Anonimizador IA: carga, estilos, y flujo REAL de anonimizacion.
-// Requiere: servidor estatico en 5199 y Chrome headless con --remote-debugging-port=9333
+// Requiere: servidor estatico en 5199 y Chrome headless con --remote-debugging-port=9334
 const URL_APP = 'http://localhost:5199/';
 const CDP = 'http://127.0.0.1:9334';
 

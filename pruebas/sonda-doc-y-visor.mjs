@@ -109,7 +109,7 @@ async function main() {
   const vis = String(await ev('document.body.innerText'));
   check('el visor se abre desde la pestaña Texto', /Con marcas|Sin marcas/i.test(vis), null);
   check('el visor muestra el contenido anonimizado', /\[EMAIL_\d+\]/.test(vis), null);
-  check('el visor ofrece imprimir y descargar', /Imprimir/i.test(vis) && /Descargar \.doc/i.test(vis), null);
+  check('el visor ofrece imprimir, texto sin mapa y respaldo separado', /Imprimir/i.test(vis) && /Descargar texto \.txt/i.test(vis) && /Respaldo confidencial \.doc/i.test(vis), null);
   check('sin excepciones en toda la prueba', errs.length === 0, errs.join(' | '));
 
   const r = await send('Page.captureScreenshot', { format: 'png' });

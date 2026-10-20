@@ -1,2 +1,3 @@
 @echo off
-start "" http://localhost:5199/
+node "%~dp0abrir-local.mjs"
+if errorlevel 1 pause

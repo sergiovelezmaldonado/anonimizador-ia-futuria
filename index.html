@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Anonimizador IA — FuturIA</title>
-  <meta name="description" content="Anonimiza datos sensibles antes de usar modelos de IA. Procesamiento 100% local, sin servidores, sin almacenamiento." />
+  <meta name="description" content="Anonimiza datos sensibles antes de usar modelos de IA. Procesamiento 100% local, sin servidores, sin historial automático." />
   <meta property="og:title" content="Anonimizador IA — FuturIA" />
-  <meta property="og:description" content="Protege información sensible antes de usar modelos de IA. Sin servidores, sin almacenamiento." />
+  <meta property="og:description" content="Protege información sensible antes de usar modelos de IA. Sin servidores, sin historial automático." />
   <!-- CDN con version EXACTA (estandar FuturIApp): un salto de version mayor del CDN
        rompe la app en produccion sin que nadie toque el codigo. -->
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
@@ -26,6 +26,8 @@
     mark.anon { border-radius: 4px; padding: 0 2px; }
     @media print {
       header, nav, footer, .no-print { display: none !important; }
+      #root { display: none !important; }
+      body::before { content: 'Para imprimir el resultado revisado, utiliza el botón Imprimir del visor. La página de trabajo incluye originales y no se imprime.'; }
       body { margin: 0; }
     }
   </style>
@@ -50,7 +52,28 @@ function formatMoneyRange(value) {
 }
 
 // ─── Categorías ───────────────────────────────────────────────────────────────
+function getPersonPatterns(text) {
+  // Heurística contextual, no reconocimiento general de entidades. Puede omitir nombres.
+  const contexts = /\b(?:nombre(?: completo)?|paciente|emplead[oa]|trabajador[ae]?|evaluador[ae]?|representad[oa] por|representante|firmante|firma(?: empleador| trabajador)?|contacto(?: RRHH)?|estudiante|alumn[oa]|beneficiari[oa]|titular|estimad[oa]|señor[ae]?|Sr\.?|Sra\.?|Dr\.?|Dra\.?|atentamente|saludos)[\t ]*[:.,]?[\t ]*(?:\r?\n[\t ]*)?/gi;
+  const name = /^[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+(?:[\t ]+(?:(?:de|del|la|las|los)[\t ]+)*[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'’\-]+){1,5}/;
+  const notNames = /\b(?:Gerente|General|Director[ae]?|Departamento|Recursos|Humanos|Banco|Hospital|Universidad|Contrato|Datos|Software|Senior|Marketing|Tecnología|Sistemas|Soluciones|Grupo|Empresa|Cliente|Equipo|Servicio)\b/;
+  const found = new Set();
+  let context;
+  while ((context = contexts.exec(String(text || '')))) {
+    const match = name.exec(text.slice(contexts.lastIndex));
+    if (match && !notNames.test(match[0])) found.add(match[0]);
+  }
+  return [...found].sort((a, b) => b.length - a.length).map(value =>
+    new RegExp('(?<![\\p{L}\\p{N}_])' + value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}_])', 'giu'));
+}
+
 const CATS = [
+  {
+    id: 'person', label: 'Nombres de personas (por contexto)',
+    ex: 'Paciente: María García · Sr. Carlos López',
+    color: '#be185d', bg: '#fdf2f8', border: '#fbcfe8', tag: 'PERSONA',
+    on: true, pats: []
+  },
   {
     id: 'credentials',
     label: 'Credenciales y API keys',
@@ -59,9 +82,7 @@ const CATS = [
     on: true, alwaysOn: true,
     pats: [
       /\b(?:sk_live|sk_test|sk_proj)[A-Za-z0-9_\-]{10,}/g,
-      /\b(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|auth[_\-]?token|client[_\-]?secret)[\s:=]+['"]?[A-Za-z0-9_\-.]{8,}['"]?/gi,
-      /\bpassword[\s:=]+['"]?[^\s'"]{6,}['"]?/gi,
-      /\bcontraseña[\s:=]+['"]?[^\s'"]{6,}['"]?/gi,
+      /\b(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|auth[_\-]?token|client[_\-]?secret|password|contraseña)(?:\s*[:=]\s*|[\t ]+(?![:=]))(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s'"]+)/gi,
       /\bbearer\s+[A-Za-z0-9_\-.]{10,}/gi,
     ]
   },
@@ -93,6 +114,7 @@ const CATS = [
     pats: [
       /\b[A-Z]{2}\d{2}[\s\-]?(?:\d{4}[\s\-]?){4,6}\b/gi,
       /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b/g,
+      /\b(?:cuenta(?:[\t ]+(?:corriente|ahorros|bancaria|depósito|dep[oó]sito))?)[\t :#]*(?:(?:No\.?|Nro\.?|número)[\t ]*)?[\d][\d .\-/]{5,25}\d\b/gi,
     ]
   },
   {
@@ -134,6 +156,7 @@ const CATS = [
       /\b(?:EIN|FEIN|Tax\s?ID|Federal\s?ID)[\s:#]*\d{2}-\d{7}\b/gi,
       // Genérico — palabra clave fiscal + número (cubre RUC, CPF, CNPJ, NIT, RTN, DNI, CI, TIN, ITIN)
       /\b(?:RUC|CPF|CNPJ|NIT|RTN|ITIN|TIN|SSN|EIN|CUIT|CUIL|CURP|RIF|RFC|DNI|CI|RUT|RNC)[\s:#]*[\d\.\-\/]{6,18}\b/gi,
+      /\b(?:C\.?C\.?|c[eé]dula(?: de (?:ciudadan[ií]a|identidad))?)[\t :#]*\d[\d.\-]{4,17}\d\b/gi,
     ]
   },
   {
@@ -198,83 +221,126 @@ const CUSTOM_CAT = {
 
 // ─── Lógica de anonimización ──────────────────────────────────────────────────
 function runAnonymize(text, activeCats, customTerms) {
-  const reps = [];
-  let out = text;
-  const counters = {};
-
+  const source = String(text || '');
+  const reps = [], candidates = [], selected = [];
+  const protectedTags = [...source.matchAll(/\[[A-Z_]+_\d+\]/g)].map(m => ({ start: m.index, end: m.index + m[0].length }));
+  const usedTags = new Set(source.match(/\[[A-Z_]+_\d+\]/g) || []);
+  const collect = (pat, cat, priority, capture = 0) => {
+    pat.lastIndex = 0;
+    for (const match of source.matchAll(pat)) {
+      let start = match.index;
+      const end = start + match[capture].length;
+      if (end <= start) continue;
+      // Buscar la primera etiqueta que puede cruzarse; conservar los extremos sensibles.
+      let lo = 0, hi = protectedTags.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (protectedTags[mid].end <= start) lo = mid + 1; else hi = mid;
+      }
+      const add = (from, to) => {
+        if (from < to) candidates.push({ start: from, end: to, cat, priority, length: to - from });
+      };
+      for (let i = lo; i < protectedTags.length && protectedTags[i].start < end; i++) {
+        add(start, protectedTags[i].start);
+        start = protectedTags[i].end;
+      }
+      add(start, end);
+    }
+  };
   for (const cat of activeCats) {
-    counters[cat.id] = 0;
-    for (const pat of cat.pats) {
-      pat.lastIndex = 0;
-      out = out.replace(pat, (match) => {
-        if (/^\[[^\]]+_\d+\]$/.test(match.trim())) return match;
-        counters[cat.id]++;
-        const tag = '[' + cat.tag + '_' + counters[cat.id] + ']';
-
-        let hint = null;
-        if (cat.id === 'money') {
-          const numPart = match.replace(/[$\s]/g, '');
-          hint = formatMoneyRange(numPart);
-        }
-
-        reps.push({ original: match, replacement: tag, catId: cat.id, catLabel: cat.label, hint });
-        return tag;
-      });
+    const pats = cat.id === 'person' ? getPersonPatterns(source) : cat.pats;
+    for (const pat of pats) collect(pat, cat, ['credentials', 'email', 'url', 'financial', 'ip', 'fiscal', 'phone'].includes(cat.id) ? 0 : 2);
+  }
+  const terms = [...new Set(String(customTerms || '').split('\n').map(t => t.trim()).filter(t => t.length >= 2))];
+  for (const term of terms) {
+    const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Lookahead con captura: enumera también ocurrencias solapadas del mismo término.
+    collect(new RegExp('(?=(' + esc + '))', 'gi'), CUSTOM_CAT, 1, 1);
+  }
+  // Unión por posición: ninguna coincidencia parcial puede dejar un sufijo sensible.
+  candidates.sort((a, b) => a.start - b.start || b.length - a.length || a.priority - b.priority);
+  for (const item of candidates) {
+    const last = selected[selected.length - 1];
+    if (!last || item.start >= last.end) { selected.push({ ...item }); continue; }
+    last.end = Math.max(last.end, item.end);
+    // Un término explícito manda en la unión; los correos siempre se cubren completos.
+    if (item.cat.id === 'custom' || (last.cat.id !== 'custom' &&
+        (item.priority < last.priority || (item.priority === last.priority && item.length > last.length)))) {
+      last.cat = item.cat; last.priority = item.priority; last.length = item.length;
     }
   }
-
-  if (customTerms && customTerms.trim()) {
-    const terms = [...new Set(
-      customTerms.split('\n').map(t => t.trim()).filter(t => t.length >= 2)
-    )];
-    counters['custom'] = 0;
-    for (const term of terms) {
-      const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const pat = new RegExp(esc, 'gi');
-      out = out.replace(pat, (match) => {
-        if (/^\[[^\]]+_\d+\]$/.test(match.trim())) return match;
-        counters['custom']++;
-        const tag = '[PERSONALIZADO_' + counters['custom'] + ']';
-        reps.push({ original: match, replacement: tag, catId: 'custom', catLabel: 'Término personalizado', hint: null });
-        return tag;
-      });
-    }
+  const counters = {};
+  let cursor = 0, out = '';
+  for (const item of selected) {
+    const cat = item.cat;
+    const original = source.slice(item.start, item.end);
+    let tag;
+    do { counters[cat.id] = (counters[cat.id] || 0) + 1; tag = '[' + cat.tag + '_' + counters[cat.id] + ']'; } while (usedTags.has(tag));
+    usedTags.add(tag);
+    const hint = cat.id === 'money' ? formatMoneyRange(original.replace(/[$\s]/g, '')) : null;
+    reps.push({ original, replacement: tag, catId: cat.id, catLabel: cat.label, hint });
+    out += source.slice(cursor, item.start) + tag;
+    cursor = item.end;
   }
-
-  return { out, reps };
+  return { out: out + source.slice(cursor), reps };
 }
 
-// ─── Riesgo residual ──────────────────────────────────────────────────────────
-const RISK_CHECKS = [
-  { id: 'credentials', label: 'Credenciales', weight: 50, pats: [/(sk_live|sk_test|api[_-]?key|bearer|password|contraseña)[\s:=]+['"]?[A-Za-z0-9_\-.]{8,}['"]?/gi] },
-  { id: 'email', label: 'Emails', weight: 25, pats: [/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/gi] },
-  { id: 'financial', label: 'Cuentas', weight: 25, pats: [/\b[A-Z]{2}\d{2}[\s\-]?(?:\d{4}[\s\-]?){4,6}\b/gi] },
-  { id: 'ip', label: 'IPs', weight: 15, pats: [/\b(?:\d{1,3}\.){3}\d{1,3}\b/g] },
-  { id: 'phone', label: 'Teléfonos', weight: 15, pats: [/\+\d{1,3}[\s\-]?\d{3,4}[\s\-]?\d{3,4}/g] },
-  { id: 'fiscal', label: 'IDs fiscales', weight: 20, pats: [/\b[A-Z]{3,4}\d{6}[A-Z0-9]{3}\b/gi] },
-];
-
+// ─── Revisión residual: usa los mismos patrones que el motor ───────────────────
 function computeResidualRisk(text) {
-  if (!text) return { score: 0, hits: [] };
-  let score = 0;
   const hits = [];
-  for (const check of RISK_CHECKS) {
-    for (const pat of check.pats) {
-      pat.lastIndex = 0;
-      if (pat.test(text)) {
-        score += check.weight;
-        hits.push(check.label);
-        break;
+  // Las etiquetas ya presentes no son datos originales ni se vuelven a escanear.
+  const plain = String(text || '').replace(/\[[A-Z_]+_\d+\]/g, '');
+  for (const cat of CATS) {
+    const patterns = cat.id === 'person' ? getPersonPatterns(plain) : cat.pats;
+    if (patterns.some(pat => { pat.lastIndex = 0; return pat.test(plain); })) hits.push(cat.label);
+  }
+  // score se conserva como contador para compatibilidad interna; NO es porcentaje.
+  return { score: hits.length, hits };
+}
+
+function getRiskInfo(score, reviewed = false) {
+  if (score > 0) return { label: 'Datos detectables pendientes', emoji: '🔴', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
+  if (reviewed) return { label: 'Revisión manual confirmada', emoji: '🟡', color: '#92400e', bg: '#fffbeb', border: '#fcd34d' };
+  return { label: 'Revisar antes de usar', emoji: '🟡', color: '#d97706', bg: '#fffbeb', border: '#fcd34d' };
+}
+
+// ─── Mapas TSV: JSON solo cuando el encabezado lo declara ─────────────────────
+function serializeEquivalences(reps) {
+  return ['Etiqueta\tOriginal (JSON)\tHint\tCategoría', ...reps.map(r =>
+    [r.replacement, JSON.stringify(r.original), r.hint || '—', r.catLabel].join('\t'))].join('\n');
+}
+
+function parseEquivalences(text) {
+  const lines = String(text || '').split(/\r\n|\n|\r/);
+  const header = lines.findIndex(line => {
+    const cells = line.split('\t');
+    return cells[0].replace(/^\uFEFF/, '').trim() === 'Etiqueta' &&
+      /^(?:Dato )?Original \(JSON\)$/i.test((cells[1] || '').trim());
+  });
+  const jsonFormat = header !== -1;
+  const map = {};
+  for (let i = jsonFormat ? header + 1 : 0; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const cells = lines[i].split('\t');
+    const tag = cells[0].trim();
+    if (!/^\[[A-Z_]+_\d+\]$/.test(tag)) {
+      if (jsonFormat) throw new Error('Formato de mapa inválido en la línea ' + (i + 1) + ': se esperaba una etiqueta.');
+      continue; // Encabezados y notas de los mapas TSV clásicos.
+    }
+    if (cells.length < 2) throw new Error('Formato de mapa inválido en la línea ' + (i + 1) + ': falta el original.');
+    let original = cells[1];
+    if (jsonFormat) {
+      try {
+        original = JSON.parse(original);
+        if (typeof original !== 'string') throw new Error();
+      } catch {
+        throw new Error('Formato JSON inválido en la línea ' + (i + 1) + ': el original debe ser una cadena JSON. Copia la tabla completa, incluido el encabezado.');
       }
     }
+    if (map[tag] !== undefined && map[tag] !== original) throw new Error('Formato de mapa inválido: etiqueta duplicada con originales distintos.');
+    map[tag] = original; // No normalizar espacios, tabulaciones ni saltos del original.
   }
-  return { score: Math.min(100, score), hits };
-}
-
-function getRiskInfo(score) {
-  if (score >= 60) return { label: 'Alto riesgo', emoji: '🔴', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
-  if (score >= 20) return { label: 'Revisar antes de usar', emoji: '🟡', color: '#d97706', bg: '#fffbeb', border: '#fcd34d' };
-  return { label: 'Listo para usar', emoji: '🟢', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' };
+  return map;
 }
 
 // ─── Texto de muestra ─────────────────────────────────────────────────────────
@@ -326,25 +392,30 @@ function InfoIcon({ text }) {
 }
 
 // ─── Semáforo de riesgo residual ──────────────────────────────────────────────
-function RiskSemaphore({ text, activeCatIds }) {
+function RiskSemaphore({ text, reviewed, onReview }) {
   const { score, hits } = useMemo(() => computeResidualRisk(text), [text]);
-  const info = getRiskInfo(score);
+  const info = getRiskInfo(score, reviewed);
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4"
       style={{ backgroundColor: info.bg, borderColor: info.border }}>
       <span className="text-2xl">{info.emoji}</span>
       <div>
-        <div className="font-bold text-sm" style={{ color: info.color }}>{info.label} — Riesgo residual: {score}%</div>
+        <div className="font-bold text-sm" style={{ color: info.color }}>{info.label}</div>
         {hits.length > 0 ? (
           <div className="text-xs mt-0.5" style={{ color: info.color }}>
             Patrones detectados aún presentes: {hits.join(', ')} — activa esas categorías o revisa manualmente.
           </div>
         ) : (
-          <div className="text-xs mt-0.5 text-[#16a34a]">No se detectaron patrones de alto riesgo en el texto anonimizado.</div>
+          <div className="text-xs mt-0.5 text-[#92400e]">Sin coincidencias en los patrones comprobados. Esto no demuestra que el texto esté anonimizado por completo.</div>
         )}
       </div>
-      <InfoIcon text="El semáforo analiza el texto ya anonimizado buscando patrones de datos sensibles que pudieran haber quedado. Verde = sin patrones detectables. Amarillo = hay categorías con datos detectables que no estaban activas. Rojo = datos de alto riesgo aún presentes — no recomendamos usar este texto con IA." />
+      <p className="w-full text-xs text-[#92400e]">Revisa nombres sin contexto, apodos, empresas, direcciones, cifras y detalles que identifiquen a alguien. Añádelos a Términos personalizados y vuelve a procesar. No calculamos una probabilidad de riesgo.</p>
+      <label className="flex w-full items-start gap-2 text-sm text-[#333333]">
+        <input type="checkbox" data-review checked={!!reviewed} disabled={hits.length > 0}
+          onChange={e => onReview && onReview(e.target.checked)} className="mt-1" />
+        He revisado el resultado y retirado los datos que no debo compartir. Esta confirmación no certifica anonimización completa.
+      </label>
     </div>
   );
 }
@@ -367,7 +438,7 @@ function AboutModal({ open, onClose }) {
           Todo el procesamiento ocurre en tu navegador — ningún texto viaja a ningún servidor.
         </p>
         <div className="mb-4 rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 text-sm text-[#333333]">
-          <strong>Privacidad garantizada:</strong> sin cookies, sin localStorage, sin servidores. Al cerrar la pestaña, todo desaparece.
+          <strong>Sin historial automático:</strong> el contenido y el mapa se mantienen en memoria durante la sesión. La app no los guarda en una base de datos. Las descargas, el portapapeles y las copias que hagas quedan fuera de este control. La carga de librerías necesita internet.
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           {["+70K suscriptores", "+300K visitas/mes", "+80 países"].map((item) => (
@@ -540,6 +611,28 @@ function escXml(str) {
     .replace(/"/g, '&quot;');
 }
 
+async function copyLocalText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    alert('No se pudo copiar al portapapeles. Comprueba los permisos del navegador o utiliza la descarga correspondiente.');
+    return false;
+  }
+}
+
+function downloadAnonText(text) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'texto-revisado-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function downloadWordDoc(filename, title, bodyHtml) {
   const doc = [
     '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
@@ -587,24 +680,28 @@ function downloadWordDoc(filename, title, bodyHtml) {
 }
 
 // ─── Descarga combinada: tabla de equivalencias (pág. 1) + texto anonimizado ──
-function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, riskLabel, timestamp, originalLen }) {
+function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, riskLabel, timestamp, originalLen, reviewed = false }) {
+  if (!reviewed || computeResidualRisk(anonText).hits.length) return;
+  if (!window.confirm('Este respaldo CONFIDENCIAL contiene los datos originales y la tabla de equivalencias. Se guardará en tu computador y puede sincronizarse si eliges una carpeta en la nube. No lo envíes a un modelo de IA. ¿Quieres descargarlo?')) return;
   const dateStr = new Date().toISOString().slice(0, 10);
   const catMap = {};
   cats.forEach(c => { catMap[c.id] = c; });
   const countByCat = {};
   activeCats.forEach(c => { countByCat[c.id] = 0; });
   reps.forEach(r => { if (countByCat[r.catId] !== undefined) countByCat[r.catId]++; });
-  const riskEmoji = riskScore >= 60 ? '🔴' : riskScore >= 20 ? '🟡' : '🟢';
+  const reviewLabel = 'Revisión manual confirmada — no certifica anonimización completa';
 
-  const tableRows = reps.map((r, idx) => {
+  const [tableHeader, ...equivalenceRows] = serializeEquivalences(reps).split('\n').map(line => line.split('\t'));
+  const tableRows = equivalenceRows.map((cells, idx) => {
+    const r = reps[idx];
     const cat = catMap[r.catId];
     const tagStyle = cat ? 'background:' + cat.bg + ';color:' + cat.color + ';border:1pt solid ' + cat.border + ';padding:0 3pt;' : '';
     const rowClass = idx % 2 === 1 ? ' class="alt"' : '';
     return '<tr' + rowClass + '>' +
       '<td><span class="tag" style="' + tagStyle + '">' + escXml(r.replacement) + '</span></td>' +
-      '<td>' + escXml(r.original) + '</td>' +
-      '<td>' + escXml(r.hint || '—') + '</td>' +
-      '<td>' + escXml(r.catLabel) + '</td>' +
+      '<td style="white-space:pre-wrap"><span style="mso-spacerun:yes">' + escXml(cells[1]) + '</span></td>' +
+      '<td>' + escXml(cells[2]) + '</td>' +
+      '<td>' + escXml(cells[3]) + '</td>' +
       '</tr>';
   }).join('\n');
 
@@ -620,15 +717,15 @@ function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, risk
     // ── Página 1: Tabla de equivalencias ──
     '<h1>Tabla de equivalencias</h1>',
     '<p class="meta">FuturIA Anonimizador IA &nbsp;&middot;&nbsp; ' + escXml(timestamp) + '<br>',
-    'Total de reemplazos: <strong>' + reps.length + '</strong> &nbsp;&middot;&nbsp; Riesgo residual: ' + riskEmoji + ' ' + escXml(riskLabel) + ' (' + riskScore + '%)</p>',
+    'Total de reemplazos: <strong>' + reps.length + '</strong> &nbsp;&middot;&nbsp; ' + reviewLabel + '</p>',
     '<div class="instr">',
     '<p style="margin:0 0 6pt 0;"><strong>¿Qué es esta tabla?</strong> Mapeo completo entre cada etiqueta del texto anonimizado y el dato original que reemplaza. Es el único lugar donde aparecen los datos sin anonimizar.</p>',
-    '<p style="margin:0 0 6pt 0;"><strong>¿Cómo usarla?</strong> Guárdala en un lugar seguro. Para recuperar el texto original, busca cada etiqueta (ej. <span class="tag">[EMAIL_1]</span>) en la página siguiente y sustitúyela por el valor de la columna "Dato original".</p>',
+    '<p style="margin:0 0 6pt 0;"><strong>¿Cómo usarla?</strong> Guárdala en un lugar seguro. Copia la tabla completa, incluido el encabezado, y pégala en Recuperar. La columna "Original (JSON)" conserva exactamente espacios, tabulaciones y saltos de línea; la app la decodifica al recuperar.</p>',
     '<p style="margin:0;"><strong>⚠ Confidencialidad:</strong> este archivo contiene los datos originales. Trátalo con el mismo nivel de confidencialidad que el documento fuente. No lo compartas con modelos de IA.</p>',
     '</div>',
     '<h2>Detalle de reemplazos (' + reps.length + ')</h2>',
     '<table>',
-    '<tr><th>Etiqueta</th><th>Dato original</th><th>Rango / hint</th><th>Categoría</th></tr>',
+    '<tr>' + tableHeader.map(label => '<th>' + escXml(label) + '</th>').join('') + '</tr>',
     tableRows,
     '</table>',
     '<h2>Resumen por categoría</h2>',
@@ -642,25 +739,67 @@ function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, risk
     '<h1>Texto anonimizado</h1>',
     '<p class="meta">FuturIA Anonimizador IA &nbsp;&middot;&nbsp; ' + escXml(timestamp) + '<br>',
     'Caracteres originales: ' + originalLen.toLocaleString() + ' &nbsp;&middot;&nbsp; Anonimizados: ' + anonText.length.toLocaleString() + '<br>',
-    'Riesgo residual: ' + riskEmoji + ' ' + escXml(riskLabel) + ' (' + riskScore + '%)</p>',
-    '<p class="note">Texto listo para enviar a modelos de IA — datos sensibles reemplazados por etiquetas. Consulta la página anterior para recuperar los datos originales.</p>',
+    reviewLabel + '</p>',
+    '<p class="note">Este archivo contiene los originales en su primera parte. NO envíes el archivo a un modelo. Utiliza la descarga separada de texto .txt y comprueba su contenido antes de compartir.</p>',
     anonParas,
-    '<p class="footer">Procesado 100% en navegador &mdash; sin servidores, sin almacenamiento. &nbsp; futuria.substack.com</p>',
+    '<p class="footer">Procesado 100% en navegador &mdash; sin servidores, sin historial automático. &nbsp; futuria.substack.com</p>',
   ].join('\n');
 
-  downloadWordDoc('anonimizado-' + dateStr, 'Anonimizador IA — FuturIA', body);
+  downloadWordDoc('respaldo-CONFIDENCIAL-' + dateStr, 'Respaldo confidencial — FuturIA', body);
 }
 
 // ─── Visor de documento modal ─────────────────────────────────────────────────
-function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileName, originalLen }) {
+function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileName, originalLen, resultIdentity, reviewed: parentReviewed, onReview }) {
   const [showMarks, setShowMarks] = React.useState(true);
+  const [ownReviewed, setOwnReviewed] = React.useState(null);
+  const identity = resultIdentity === undefined ? reps : resultIdentity;
+  const reviewed = parentReviewed === undefined ? ownReviewed === identity : parentReviewed;
+  const setReviewed = onReview || (value => setOwnReviewed(value ? identity : null));
+  const dialogRef = React.useRef(null);
+  const closeRef = React.useRef(onClose);
+  closeRef.current = onClose;
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const root = document.getElementById('root');
+    const previousFocus = document.activeElement;
+    const previousInert = root ? root.inert : false;
+    const dialog = dialogRef.current;
+    if (root) root.inert = true;
+    const focusable = () => [...dialog.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+      .filter(node => !node.closest('[hidden], [inert]') && node.getClientRects().length);
+    const focusFirst = () => (focusable()[0] || dialog).focus();
+    focusFirst();
+    const onKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); closeRef.current(); return;
+      }
+      if (event.key !== 'Tab') return;
+      const nodes = focusable();
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      if (!nodes.length) { event.preventDefault(); dialog.focus(); }
+      else if (!dialog.contains(active) || active === dialog || (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault(); (event.shiftKey ? last : first).focus();
+      }
+    };
+    const onFocus = event => { if (!dialog.contains(event.target)) focusFirst(); };
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('focusin', onFocus, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('focusin', onFocus, true);
+      if (root) root.inert = previousInert;
+      if (previousFocus && previousFocus.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus();
+    };
+  }, [open]);
   if (!open) return null;
 
   const riskData = computeResidualRisk(anonText);
-  const riskInfo = getRiskInfo(riskData.score);
-  const canExport = riskData.score < 60;
+  const riskInfo = getRiskInfo(riskData.score, reviewed);
+  const canExport = reviewed && riskData.hits.length === 0;
 
   const handlePrint = () => {
+    if (!canExport) return;
     const catMap = {};
     cats.forEach(c => { catMap[c.id] = c; });
     const repMap = {};
@@ -690,10 +829,9 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
       '</style></head><body>' +
       '<h1>Documento Anonimizado</h1>' +
       '<div class="meta">FuturIA Anonimizador IA &nbsp;·&nbsp; ' + escXml(dateStr) + '<br>' +
-      'Archivo: ' + escXml(fileName || 'documento') + ' &nbsp;·&nbsp; ' +
-      'Riesgo residual: ' + riskInfo.emoji + ' ' + escXml(riskInfo.label) + ' (' + riskData.score + '%)</div>' +
+      'Revisión: ' + escXml(riskInfo.label) + '. No certifica anonimización completa.</div>' +
       paragraphsHtml +
-      '<div class="footer">Procesado 100% en navegador — sin servidores, sin almacenamiento. futuria.substack.com</div>' +
+      '<div class="footer">Procesado 100% en navegador — sin servidores, sin historial automático. futuria.substack.com</div>' +
       '</body></html>';
 
     const win = window.open('', '_blank');
@@ -704,6 +842,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
   };
 
   const handleDownload = () => {
+    if (!canExport) return;
     downloadCombinedDoc({
       anonText,
       reps,
@@ -711,13 +850,14 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
       activeCats,
       riskScore: riskData.score,
       riskLabel: riskInfo.label,
+      reviewed,
       timestamp: new Date().toLocaleString('es'),
       originalLen: originalLen || anonText.length,
     });
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: '#f0f0f0' }} role="dialog" aria-modal="true">
+  return ReactDOM.createPortal(
+    <div ref={dialogRef} tabIndex={-1} className="no-print fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: '#f0f0f0' }} role="dialog" aria-modal="true" aria-label="Documento anonimizado">
       {/* Toolbar */}
       <div className="shrink-0 border-b border-[#e5e5e5] bg-white shadow-sm">
         <div className="flex flex-wrap items-center gap-2 px-5 py-3">
@@ -726,7 +866,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
             ← Cerrar
           </button>
           <div className="mx-2 h-5 w-px bg-[#e5e5e5]" />
-          <span className="text-sm font-semibold" style={{ color: riskInfo.color }}>{riskInfo.emoji} {riskInfo.label} ({riskData.score}%)</span>
+          <span className="text-sm font-semibold" style={{ color: riskInfo.color }}>{riskInfo.emoji} {riskInfo.label}</span>
           {fileName && <span className="hidden text-xs text-[#757575] sm:inline">· {fileName}</span>}
           <div className="flex-1" />
           <button
@@ -735,21 +875,25 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
               showMarks ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]' : 'border-[#e5e5e5] bg-white text-[#757575] hover:bg-[#fafafa]')}>
             {showMarks ? '● Con marcas' : '○ Sin marcas'}
           </button>
-          <button onClick={handlePrint}
+          <button onClick={handlePrint} disabled={!canExport}
             className="flex items-center gap-1.5 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2 text-xs font-semibold text-[#333333] hover:bg-[#fff5f6] transition">
             🖨 Imprimir
           </button>
-          <AppButton onClick={handleDownload} disabled={!canExport} className="text-xs">
-            ↓ Descargar .doc
+          <AppButton onClick={() => canExport && downloadAnonText(anonText)} disabled={!canExport} className="text-xs">
+            ↓ Descargar texto .txt
+          </AppButton>
+          <AppButton onClick={handleDownload} disabled={!canExport} variant="secondary" className="text-xs">
+            ↓ Respaldo confidencial .doc
           </AppButton>
         </div>
         {!canExport && (
           <div className="border-t border-[#fecaca] bg-[#fef2f2] px-5 py-2 text-xs font-semibold text-[#dc2626]">
-            🔴 Exportación deshabilitada — riesgo residual {riskData.score}%. Activa más categorías y vuelve a anonimizar.
+            Exportación deshabilitada hasta retirar las coincidencias pendientes y confirmar la revisión manual.
           </div>
         )}
       </div>
 
+      <div className="shrink-0 px-5 py-2"><RiskSemaphore text={anonText} reviewed={reviewed} onReview={setReviewed} /></div>
       {/* Paper scroll area */}
       <div className="flex-1 overflow-y-auto py-8 px-4">
         <div className="mx-auto max-w-3xl rounded-sm bg-white shadow-xl" style={{ padding: '3cm 3.5cm', minHeight: '27cm' }}>
@@ -764,11 +908,12 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 
           {/* Doc footer */}
           <div className="mt-8 border-t border-[#e5e5e5] pt-4 text-xs text-[#aaaaaa]">
-            Procesado 100% en navegador — sin servidores, sin almacenamiento. &nbsp; futuria.substack.com
+            Procesado 100% en navegador — sin servidores, sin historial automático. &nbsp; futuria.substack.com
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -776,37 +921,37 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 function HowToTab() {
   const steps = [
     { n: '1', icon: '📄', title: 'Pega o sube tu documento',
-      desc: 'Pega texto directamente en la pestaña Texto, o sube un archivo PDF, DOCX, DOC, TXT o CSV. También puedes usar las 50 plantillas de ejemplo organizadas en 8 industrias para probar la app.',
-      tip: 'PDFs escaneados (solo imágenes) no tienen texto extraíble. Usa PDFs con texto seleccionable o extrae el texto con Adobe Acrobat / Google Docs primero.' },
+      desc: 'Pega texto directamente en la pestaña Texto, o sube un archivo PDF, DOCX, TXT o CSV. También puedes usar las 50 plantillas de ejemplo organizadas en 8 industrias para probar la app. El DOC antiguo requiere conversión a DOCX.',
+      tip: 'Los PDF escaneados necesitan OCR. Para información confidencial, usa una herramienta local autorizada por tu organización; no la subas a un OCR online.' },
     { n: '2', icon: '⚙️', title: 'Configura las categorías',
-      desc: 'Activa o desactiva los tipos de datos a detectar. Las credenciales y API keys siempre se detectan. Usa el campo de Términos personalizados para añadir nombres propios, siglas internas o cualquier dato específico de tu industria — un término por línea.',
+      desc: 'Activa o desactiva los tipos de datos a detectar. La categoría Credenciales siempre está activa. Los nombres se buscan por contexto, con posibles omisiones. Añade nombres, apodos, siglas internas y otros datos a Términos personalizados — un término por línea.',
       tip: 'Activa solo lo necesario. Empresa, Dirección, Montos y Fechas son opcionales y pueden generar más falsos positivos.' },
     { n: '3', icon: '🔒', title: 'Haz clic en "Anonimizar"',
-      desc: 'El sistema reemplaza cada dato sensible por una etiqueta única como [EMAIL_1] o [CREDENCIAL_1]. El semáforo de riesgo residual te indica si el texto resultante es seguro. Si el riesgo es alto (🔴), la exportación queda bloqueada hasta revisar.',
+      desc: 'El sistema sustituye las coincidencias por etiquetas como [EMAIL_1] o [PERSONA_1]. El semáforo indica coincidencias pendientes, no seguridad garantizada. Revisa el resultado completo y confirma la revisión; copiar, descargar e imprimir quedan bloqueados hasta entonces.',
       tip: 'Pasa el cursor sobre cualquier etiqueta para ver el valor original.' },
     { n: '4', icon: '📤', title: 'Envía al LLM',
-      desc: 'Copia el texto anonimizado con el botón "📋 Copiar texto" y pégalo en ChatGPT, Claude, Gemini o cualquier otro modelo. El LLM trabajará con etiquetas en lugar de datos reales — sin exponer ninguna información sensible.',
-      tip: 'Descarga también el .doc para guardar la tabla de equivalencias junto al texto anonimizado, especialmente si cerrarás el navegador antes de recuperar el resultado.' },
+      desc: 'Tras revisar, copia el resultado o descarga el texto .txt, que no incluye la tabla de originales. Compártelo únicamente cuando su contenido y las reglas de tu organización lo permitan. El contexto del documento aún puede identificar a personas.',
+      tip: 'El respaldo confidencial .doc conserva los originales para recuperarlos. No lo envíes a un modelo de IA. Su descarga requiere una confirmación adicional.' },
     { n: '5', icon: '💬', title: 'Procesa con el modelo de IA',
       desc: 'Haz tu consulta al LLM normalmente. El modelo responderá conservando las etiquetas [TAG_N] en el texto. Copia la respuesta completa — con las etiquetas incluidas.',
       tip: 'La mayoría de los modelos preservan las etiquetas correctamente. Si el modelo las elimina, pídele explícitamente que las conserve en su respuesta.' },
     { n: '6', icon: '🔄', title: 'Recupera el texto original',
       desc: 'Ve a la pestaña "🔄 Recuperar" y pega el texto que te devolvió el LLM. Si estás en la misma sesión, el mapeo se carga automáticamente. Si cerraste el navegador, pega la tabla de equivalencias del .doc descargado. Un clic y el texto vuelve con los datos reales.',
-      tip: 'Al cerrar la pestaña todo desaparece — si planeas recuperar el texto en otra sesión, descarga el .doc antes de cerrar.' },
+      tip: 'Al recargar se pierde el mapa en memoria. Para recuperarlo en otra sesión, guarda antes el respaldo confidencial. Los archivos descargados y el portapapeles no se borran al cerrar.' },
   ];
 
   return (
     <div className="space-y-8">
       <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6">
         <h2 className="mb-2 text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
-        <p className="mb-4 text-sm text-[#757575]">Protege datos sensibles antes de enviar documentos a modelos de IA. Procesamiento 100% local — sin servidores, sin almacenamiento, sin registro.</p>
+        <p className="mb-4 text-sm text-[#757575]">Protege datos sensibles antes de enviar documentos a modelos de IA. Procesamiento 100% local — sin servidores, sin historial automático, sin registro.</p>
         <div className="rounded-2xl border border-[#b00020]/20 bg-white p-4">
           <p className="text-sm font-semibold text-[#222222] mb-1">¿Por qué es seguro usar esta app?</p>
           <p className="text-sm leading-relaxed text-[#333333]">
             A diferencia de subir un documento a un servicio en la nube, esta app procesa tu texto <strong>únicamente dentro de tu navegador</strong>.
             El código se ejecuta en tu dispositivo — no existe ningún servidor que reciba, almacene o analice tu contenido.
             Puedes verificarlo: abre DevTools (F12 → pestaña Red) y comprueba que no hay ninguna petición de red mientras anonimizas.
-            Al cerrar la pestaña, todo desaparece — sin localStorage, cookies ni ningún mecanismo de persistencia.
+            La app no crea historial ni guarda documentos en localStorage, cookies o bases de datos. El contenido queda en memoria durante la sesión. Las librerías y fuentes se cargan desde internet; los PDF y DOCX activan cargas adicionales de recursos. Las descargas y el portapapeles pueden conservar tus datos fuera de la app.
           </p>
         </div>
       </div>
@@ -864,7 +1009,7 @@ function HowToTab() {
             ['PII', 'Personally Identifiable Information — datos que permiten identificar a una persona (email, teléfono, ID fiscal, nombre propio).'],
             ['IDs fiscales LATAM+USA', 'RFC (México), CURP (México), CUIT/CUIL (Argentina), RUT (Chile), NIT (Colombia), RIF (Venezuela), RUC (Ecuador/Perú/Paraguay), CPF/CNPJ (Brasil), RTN (Honduras), RNC (R. Dominicana), SSN/EIN (EE.UU.) y otros identificadores tributarios nacionales.'],
             ['Modo heurístico', 'Categoría que usa reglas aproximadas para detectar datos sensibles. Puede generar falsos positivos (detectar algo que no es sensible) o falsos negativos (no detectar algo que sí lo es). Las categorías Empresa, Dirección y Fecha operan en modo heurístico — revisa el resultado antes de enviar.'],
-            ['Riesgo residual', 'Patrones de datos sensibles detectados en el texto ya anonimizado. Ocurre cuando hay categorías no activas que contienen datos. El semáforo verde/amarillo/rojo lo mide automáticamente.'],
+            ['Revisión residual', 'Búsqueda de coincidencias que siguen presentes después de sustituir datos. No es una medición de probabilidad ni una certificación de seguridad. Ausencia de coincidencias no significa ausencia de datos sensibles.'],
             ['Falso positivo', 'Dato detectado como sensible que en realidad no lo es. Más frecuente en categorías heurísticas (empresa, dirección, fecha).'],
             ['Falso negativo', 'Dato sensible que la app no detectó. Revisa siempre el resultado, especialmente en documentos con formatos o idiomas inusuales.'],
           ].map(([t, d]) => (
@@ -885,13 +1030,14 @@ function PrivacyTab() {
     <div className="space-y-6 max-w-3xl">
       <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6">
         <h2 className="mb-1 text-xl font-bold text-[#222222]">Privacidad y arquitectura de datos</h2>
-        <p className="text-sm text-[#757575]">Esta app fue diseñada para no guardar, transmitir ni exponer ningún dato.</p>
+        <p className="text-sm text-[#757575]">El procesamiento de documentos ocurre en tu navegador, sin historial automático. Revisa los límites y lo que conservan las acciones de copiar y descargar.</p>
       </div>
       {[
-        { icon: '🔒', title: 'Procesamiento 100% local', body: 'Todo ocurre en tu navegador. El texto nunca sale de tu dispositivo. Sin llamadas a servidores, sin APIs externas, sin logging.' },
-        { icon: '🗑️', title: 'Sin almacenamiento de ningún tipo', body: 'Sin localStorage, sessionStorage, cookies ni IndexedDB. Al cerrar o recargar la pestaña, todo desaparece. Sin rastros en tu navegador.' },
+        { icon: '🔒', title: 'Procesamiento local del contenido', body: 'La app procesa texto, PDF y DOCX en el navegador. No envía documentos a un servidor ni llama a un modelo de IA. Usa reglas y términos personalizados. La carga de librerías y fuentes sí necesita internet; no es una aplicación completamente offline.' },
+        { icon: '🗑️', title: 'Sin historial automático de documentos', body: 'La app no escribe documentos ni el mapa en localStorage, sessionStorage, cookies o IndexedDB. El contenido y las equivalencias permanecen en memoria mientras trabajas y se pierden al recargar. Borrar sesión retira los datos del estado de la app; no es un borrado forense del computador.' },
+        { icon: '📂', title: 'Descargas, portapapeles y copias', body: 'Copiar deja contenido en el portapapeles, cuyo historial o sincronización depende del sistema. Las descargas permanecen en la carpeta elegida; una carpeta de OneDrive u otro servicio puede sincronizarlas. El respaldo confidencial .doc contiene los originales. Borrar sesión no elimina estos archivos, el portapapeles, cachés de recursos ni copias del sistema o de extensiones.' },
         { icon: '📡', title: 'Sin telemetría ni analítica', body: 'Sin Google Analytics, Mixpanel, Hotjar ni equivalentes. No se registra qué textos procesas, qué categorías usas ni en qué momentos.' },
-        { icon: '⚠️', title: 'Límites de esta herramienta', body: 'No detecta nombres propios de personas por sí solos (requiere NLP/IA), no lee PDFs escaneados sin capa de texto, y no garantiza anonimización completa en textos complejos. Usa siempre el semáforo de riesgo residual y revisa el resultado.' },
+        { icon: '⚠️', title: 'Límites de detección', body: 'Los nombres se detectan mediante contextos como Paciente, Trabajador, Sr. o Firma; un nombre aislado, un apodo o una entidad en otro idioma puede quedar sin sustituir. También pueden existir falsos positivos. No hay OCR para PDF escaneado. Las sustituciones reversibles son seudonimización, no una garantía de anonimización completa. Debes revisar los detalles que permiten identificar a una persona antes de compartir.' },
       ].map(item => (
         <div key={item.title} className="rounded-[28px] border border-[#e5e5e5] bg-white p-6 shadow-sm">
           <div className="flex items-start gap-4">
@@ -904,7 +1050,7 @@ function PrivacyTab() {
         </div>
       ))}
       <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] p-6 text-sm text-[#333333]">
-        <strong className="text-[#222222]">Verificación técnica:</strong> abre DevTools (F12 → Network) mientras usas la app. Verás que no hay peticiones de red durante la anonimización. El único tráfico es la carga inicial de React, Babel y Tailwind desde CDNs públicas.
+        <strong className="text-[#222222]">Verificación técnica:</strong> en DevTools (F12 → Network) puedes distinguir la descarga de React, Babel, Tailwind, fuentes, pdf.js y mammoth del procesamiento del documento. No hay API que reciba su contenido. Esto no protege frente a extensiones maliciosas, un computador comprometido ni cambios en las librerías externas.
       </div>
     </div>
   );
@@ -973,13 +1119,14 @@ async function extractTextFromFile(file, onProgress) {
     onProgress('Abriendo documento PDF…');
     let pdf;
     try {
-      pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
     } catch (e) {
       throw new Error(
         'No se pudo abrir el PDF. Posibles causas: archivo protegido con contraseña, PDF corrupto o formato no estándar.\n\n' +
         'Alternativa: abre el PDF, selecciona todo (Ctrl+A), copia y pega el texto directamente en el área de texto.'
       );
     }
+    try {
     const totalPages = pdf.numPages;
     if (totalPages > MAX_PDF_PAGES) {
       throw new Error(
@@ -1007,11 +1154,14 @@ async function extractTextFromFile(file, onProgress) {
     if (!trimmed) {
       throw new Error(
         'El PDF no contiene texto seleccionable — es un PDF escaneado (solo imágenes).\n\n' +
-        'Alternativa: usa Adobe Acrobat, Google Docs o un OCR online para convertirlo a texto, ' +
+        'Alternativa: usa un OCR local autorizado por tu organización para convertirlo a texto; no subas información confidencial a un OCR online. ' +
         'luego pégalo aquí manualmente.'
       );
     }
     return trimmed;
+    } finally {
+      await pdf.destroy();
+    }
   }
 
   if (ext === 'docx' || ext === 'doc') {
@@ -1051,7 +1201,7 @@ async function extractTextFromFile(file, onProgress) {
     return result.value;
   }
 
-  throw new Error('Formato no compatible: .' + ext + '. Usa PDF, DOCX, DOC, TXT o CSV.');
+  throw new Error('Formato no compatible: .' + ext + '. Usa PDF, DOCX, TXT o CSV. El DOC antiguo requiere conversión a DOCX.');
 }
 
 // ─── Plantillas de ejemplo ────────────────────────────────────────────────────
@@ -2186,6 +2336,8 @@ function TemplatesPanel({ onSelect, onClose }) {
 function AnonTab({ setLastResult }) {
   const [inputText, setInputText] = useState('');
   const [result, setResult] = useState(null);
+  const [reviewed, setReviewed] = useState(false);
+  React.useEffect(() => { setReviewed(false); }, [result]);
   const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
   const [customTerms, setCustomTerms] = useState('');
   const [showOriginal, setShowOriginal] = useState(false);
@@ -2196,6 +2348,7 @@ function AnonTab({ setLastResult }) {
   const [showTemplates, setShowTemplates] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerData, setViewerData] = useState(null);
+  const viewerGeneration = useRef(0);
   const outputRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -2207,7 +2360,7 @@ function AnonTab({ setLastResult }) {
     // Auto-activate relevant categories
     setCats(prev => prev.map(c => {
       if (c.alwaysOn) return c;
-      const shouldActivate = template.cats.includes(c.id);
+      const shouldActivate = c.id === 'person' || template.cats.includes(c.id);
       return Object.assign({}, c, { on: shouldActivate });
     }));
   };
@@ -2226,6 +2379,9 @@ function AnonTab({ setLastResult }) {
     if (!window.confirm('¿Borrar el texto y el resultado? Esta acción no se puede deshacer.')) return;
     setInputText('');
     setResult(null);
+    setCustomTerms('');
+    setLastResult(null);
+    setViewerData(null);
   };
 
   const handleFile = async (file) => {
@@ -2266,20 +2422,21 @@ function AnonTab({ setLastResult }) {
   };
 
   const copyOutput = () => {
-    if (!result) return;
-    navigator.clipboard.writeText(result.out).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+    if (!result || !reviewed || computeResidualRisk(result.out).hits.length) return;
+    copyLocalText(result.out).then(ok => { if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); } });
   };
 
   const copyTable = () => {
     if (!result || !result.reps.length) return;
-    const lines = result.reps.map(r => r.replacement + '\t' + r.original + (r.hint ? '\t(' + r.hint + ')' : '') + '\t' + r.catLabel);
-    navigator.clipboard.writeText(['Etiqueta\tOriginal\tHint\tCategoría'].concat(lines).join('\n')).then(() => {
+    if (!window.confirm('Este mapa CONFIDENCIAL contiene los datos originales. El portapapeles puede conservarlos o sincronizarlos. No lo pegues en un modelo de IA. ¿Quieres copiarlo?')) return;
+    copyLocalText(serializeEquivalences(result.reps)).then(ok => {
+      if (!ok) return;
       setCopiedTable(true); setTimeout(() => setCopiedTable(false), 2000);
     });
   };
 
   const downloadDocs = () => {
-    if (!result) return;
+    if (!result || !reviewed || computeResidualRisk(result.out).hits.length) return;
     const { score } = computeResidualRisk(result.out);
     const riskInfo = getRiskInfo(score);
     const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
@@ -2290,6 +2447,7 @@ function AnonTab({ setLastResult }) {
       activeCats: effectiveActiveCats,
       riskScore: score,
       riskLabel: riskInfo.label,
+      reviewed,
       timestamp: new Date().toLocaleString('es'),
       originalLen: inputText.length,
     });
@@ -2301,6 +2459,7 @@ function AnonTab({ setLastResult }) {
     if (!result) return;
     const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
     setViewerData({
+      generation: ++viewerGeneration.current,
       anonText: result.out,
       reps: result.reps,
       cats: allCats,
@@ -2312,7 +2471,7 @@ function AnonTab({ setLastResult }) {
   };
 
   const riskData = result ? computeResidualRisk(result.out) : null;
-  const canExport = result && riskData && riskData.score < 60;
+  const canExport = result && riskData && riskData.hits.length === 0 && reviewed;
   const totalDetected = result ? result.reps.length : 0;
   const byCategory = result
     ? allCats.map(c => Object.assign({}, c, { count: result.reps.filter(r => r.catId === c.id).length })).filter(c => c.count > 0)
@@ -2428,12 +2587,12 @@ function AnonTab({ setLastResult }) {
       {result ? (
         <div ref={outputRef} className="space-y-4">
           {/* Semáforo */}
-          <RiskSemaphore text={result.out} activeCatIds={activeCats.map(c => c.id)} />
+          <RiskSemaphore text={result.out} reviewed={reviewed} onReview={setReviewed} />
 
           {/* Bloqueo si riesgo alto */}
-          {riskData && riskData.score >= 60 ? (
+          {riskData && !canExport ? (
             <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] p-4 text-sm text-[#dc2626] font-semibold">
-              🔴 Exportación deshabilitada — riesgo residual demasiado alto ({riskData.score}%). Activa las categorías marcadas por el semáforo y vuelve a anonimizar.
+              Exportación deshabilitada. Retira las coincidencias pendientes, revisa el resultado y confirma la revisión manual.
             </div>
           ) : null}
 
@@ -2483,8 +2642,8 @@ function AnonTab({ setLastResult }) {
                 <AppButton variant="secondary" onClick={openViewer}>
                   🔎 Ver como documento
                 </AppButton>
-                <AppButton onClick={downloadDocs} disabled={!canExport}>
-                  ↓ Descargar .doc
+                <AppButton onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>
+                  ↓ Descargar texto .txt
                 </AppButton>
               </div>
             </div>
@@ -2513,7 +2672,7 @@ function AnonTab({ setLastResult }) {
 
             <p className="mt-2 text-xs text-[#757575]">
               Pasa el cursor sobre las etiquetas para ver el valor original.
-              {riskData && riskData.score >= 60 ? ' La exportación está deshabilitada por alto riesgo residual.' : ''}
+              {!canExport ? ' La exportación requiere revisión manual y no tener coincidencias pendientes.' : ''}
             </p>
           </div>
 
@@ -2523,14 +2682,14 @@ function AnonTab({ setLastResult }) {
               <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <h3 className="font-bold text-[#222222]">Tabla de equivalencias</h3>
-                  <InfoIcon text="Esta tabla mapea [ETIQUETA] → dato original. Se incluye automáticamente en el segundo .doc al descargar. Al cerrar la pestaña, desaparece." />
+                  <InfoIcon text="Esta tabla contiene los originales. Solo se incluye en el respaldo confidencial .doc, nunca en la descarga de texto .txt. No la compartas con un modelo." />
                 </div>
                 <div className="flex gap-2">
                   <AppButton variant="secondary" onClick={copyTable}>
-                    {copiedTable ? '✓ Copiada' : '📋 Copiar'}
+                    {copiedTable ? '✓ Copiada' : '📋 Copiar mapa confidencial'}
                   </AppButton>
                   <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport}>
-                    ↓ Descargar .doc
+                    ↓ Respaldo confidencial .doc
                   </AppButton>
                 </div>
               </div>
@@ -2584,6 +2743,9 @@ function AnonTab({ setLastResult }) {
         <DocumentViewer
           open={viewerOpen}
           onClose={() => setViewerOpen(false)}
+          reviewed={reviewed}
+          onReview={setReviewed}
+          resultIdentity={viewerData.generation}
           anonText={viewerData.anonText}
           reps={viewerData.reps}
           cats={viewerData.cats}
@@ -2597,7 +2759,7 @@ function AnonTab({ setLastResult }) {
 }
 
 // ─── Pestaña Documento ────────────────────────────────────────────────────────
-function DocumentTab() {
+function DocumentTab({ setLastResult }) {
   const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
   const [customTerms, setCustomTerms] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -2605,6 +2767,7 @@ function DocumentTab() {
   const [uploadedFile, setUploadedFile] = useState(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerData, setViewerData] = useState(null);
+  const viewerGeneration = useRef(0);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -2647,8 +2810,10 @@ function DocumentTab() {
     if (!uploadedFile) return;
     if (activeCats.length === 0 && !hasCustomTerms) return;
     const r = runAnonymize(uploadedFile.text, activeCats, customTerms);
+    setLastResult(r);
     const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
     setViewerData({
+      generation: ++viewerGeneration.current,
       anonText: r.out,
       reps: r.reps,
       cats: allCats,
@@ -2749,6 +2914,7 @@ function DocumentTab() {
         <DocumentViewer
           open={viewerOpen}
           onClose={() => setViewerOpen(false)}
+          resultIdentity={viewerData.generation}
           anonText={viewerData.anonText}
           reps={viewerData.reps}
           cats={viewerData.cats}
@@ -2775,24 +2941,16 @@ function RecoverTab({ lastResult }) {
       for (const r of lastResult.reps) map[r.replacement] = r.original;
       return map;
     } else if (mode === 'paste' && mappingText.trim()) {
-      const map = {};
-      const lines = mappingText.trim().split('\n');
-      for (const line of lines) {
-        const parts = line.split('\t');
-        if (parts.length >= 2) {
-          const tag = parts[0].trim();
-          const original = parts[1].trim();
-          if (/^\[[A-Z_]+_\d+\]$/.test(tag)) map[tag] = original;
-        }
-      }
-      return map;
+      return parseEquivalences(mappingText);
     }
     return {};
   };
 
   const recover = () => {
     if (!modifiedText.trim()) { alert('Pega el texto modificado por el LLM.'); return; }
-    const mapping = buildMapping();
+    let mapping;
+    try { mapping = buildMapping(); }
+    catch (error) { setRecovered(null); alert('No se pudo leer la tabla de equivalencias. ' + error.message); return; }
     if (!Object.keys(mapping).length) {
       alert('No hay mapeo disponible. Cambia a "Pegar tabla" y pega la tabla de equivalencias.');
       return;
@@ -2815,7 +2973,8 @@ function RecoverTab({ lastResult }) {
 
   const copyRecovered = () => {
     if (!recovered) return;
-    navigator.clipboard.writeText(recovered.out).then(() => {
+    copyLocalText(recovered.out).then(ok => {
+      if (!ok) return;
       setCopiedRecover(true);
       setTimeout(() => setCopiedRecover(false), 2000);
     });
@@ -2876,7 +3035,7 @@ function RecoverTab({ lastResult }) {
               value={mappingText}
               onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
               className="w-full rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-3 font-mono text-xs text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#b00020]/30 resize-y"
-              placeholder={"Etiqueta\tDato original\tRango / Hint\tCategoría\n[EMAIL_1]\tmaria@empresa.com\t—\tCorreos electrónicos\n[TELEFONO_1]\t+52 55 4321 0987\t—\tTeléfonos"}
+              placeholder={"Etiqueta\tOriginal (JSON)\tHint\tCategoría\n[EMAIL_1]\t\"maria@empresa.com\"\t—\tCorreos electrónicos\n[TELEFONO_1]\t\"+52 55 4321 0987\"\t—\tTeléfonos"}
             />
             <p className="mt-1.5 text-xs text-[#757575]">
               En Word: selecciona la tabla → Copiar → pega aquí · O usa "📋 Copiar" de la tabla en la pestaña Texto
@@ -2961,6 +3120,14 @@ function App() {
   const [tab, setTab] = useState('how');
   const [aboutOpen, setAboutOpen] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [sessionKey, setSessionKey] = useState(0);
+  const clearSession = () => {
+    if (!window.confirm('¿Borrar el contenido y las equivalencias de esta sesión? No elimina archivos descargados ni el portapapeles.')) return;
+    setLastResult(null);
+    setSessionKey(key => key + 1);
+    setTab('how');
+    setAboutOpen(false);
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -2977,6 +3144,7 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <AppButton variant="secondary" onClick={clearSession}>Borrar sesión</AppButton>
             <AppButton variant="secondary" onClick={() => setAboutOpen(true)}>Acerca de</AppButton>
             <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer">
               <AppButton>Únete a FuturIA →</AppButton>
@@ -3000,16 +3168,16 @@ function App() {
         </div>
       </nav>
 
-      <main className="mx-auto max-w-7xl px-5 py-8">
+      <main key={sessionKey} className="mx-auto max-w-7xl px-5 py-8">
         {tab === 'how' ? <HowToTab /> : null}
         {tab === 'texto' ? <AnonTab setLastResult={setLastResult} /> : null}
-        {tab === 'doc' ? <DocumentTab /> : null}
+        {tab === 'doc' ? <DocumentTab setLastResult={setLastResult} /> : null}
         {tab === 'recover' ? <RecoverTab lastResult={lastResult} /> : null}
         {tab === 'privacy' ? <PrivacyTab /> : null}
       </main>
 
       <footer className="border-t border-[#e5e5e5] py-6 text-center text-xs text-[#757575]">
-        FuturIA Anonimizador IA — Procesamiento 100% local. Sin servidores. Sin almacenamiento.
+        FuturIA Anonimizador IA — Procesamiento local del contenido. Sin historial automático. Requiere revisión manual.
         {' · '}
         <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer" className="text-[#b00020] hover:underline">futuria.substack.com</a>
       </footer>

@@ -1,47 +1,42 @@
-// Servidor estático local para ver el Anonimizador IA.
-// Uso: node servidor-local.mjs   ->  http://localhost:5199
+// Solo sirve la aplicación; no recibe ni almacena documentos.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
-
-const PUERTO = 5199;
-const RAIZ = process.cwd();
-
-const TIPOS = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
+const PUERTO = Number(process.env.ANON_PORT || 5199);
+const INDEX = new URL('./index.html', import.meta.url);
+const headers = {
+  'X-Anonimizador-Server': 'futuria-local-2',
+  'Content-Type': 'text/html; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
 };
-
-createServer(async (req, res) => {
-  try {
-    let ruta = decodeURIComponent((req.url || '/').split('?')[0]);
-    if (ruta === '/' || ruta === '') ruta = '/index.html';
-
-    // no permitir salir de la carpeta del proyecto
-    const abs = normalize(join(RAIZ, ruta));
-    if (!abs.startsWith(RAIZ)) {
-      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('403 prohibido');
-    }
-
-    const datos = await readFile(abs);
-    res.writeHead(200, {
-      'Content-Type': TIPOS[extname(abs).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': 'no-store',
-    });
-    res.end(datos);
-  } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('404 no encontrado');
+const server = createServer(async (req, res) => {
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    res.writeHead(405, { ...headers, Allow: 'GET, HEAD' });
+    req.resume();
+    return res.end('Método no permitido');
   }
-}).listen(PUERTO, () => {
-  console.log('Anonimizador IA sirviendo en http://localhost:' + PUERTO);
-  console.log('Carpeta: ' + RAIZ);
-  console.log('Para detenerlo: Ctrl+C en esta terminal.');
+  try {
+    const path = decodeURIComponent((req.url || '/').split('?')[0]);
+    // Lista cerrada: jamás exponer .git, pruebas, README ni otros archivos.
+    if (!['/', '/index.html'].includes(path)) {
+      res.writeHead(404, headers);
+      return res.end(req.method === 'HEAD' ? '' : 'No encontrado');
+    }
+    const data = await readFile(INDEX);
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : data);
+  } catch {
+    res.writeHead(404, headers);
+    res.end(req.method === 'HEAD' ? '' : 'No encontrado');
+  }
+});
+server.on('error', err => {
+  console.error(err.code === 'EADDRINUSE' ? 'El puerto ' + PUERTO + ' ya está en uso.' : 'No se pudo iniciar el servidor local: ' + err.code);
+  process.exitCode = 1;
+});
+// No escuchar en la red local ni en todas las interfaces.
+server.listen(PUERTO, '127.0.0.1', () => {
+  console.log('Anonimizador IA sirviendo en http://127.0.0.1:' + PUERTO);
 });

@@ -64,7 +64,7 @@ async function main() {
   console.log('marcadores encontrados: ' + enVisor.length + ' de ' + TOTAL + (enVisor.length ? ' -> paginas ' + enVisor.join(',') : ''));
   console.log('visor modal abierto: ' + /Con marcas|Sin marcas/i.test(visor));
   console.log('opcion imprimir: ' + /Imprimir/i.test(visor));
-  console.log('descargar .doc: ' + /Descargar \.doc/i.test(visor));
+  console.log('descarga .txt sin mapa y respaldo confidencial .doc: ' + (/Descargar texto \.txt/i.test(visor) && /Respaldo confidencial \.doc/i.test(visor)));
 
   const cuenta = (re) => (visor.match(re) || []).length;
   console.log('\n=== ANONIMIZACION SOBRE LAS 12 PAGINAS ===');
