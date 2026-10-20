@@ -3206,14 +3206,14 @@ function RecoverTab({ lastResult }) {
 
 // ─── App principal ────────────────────────────────────────────────────────────
 const TABS = [
+  { id: 'how', label: 'Cómo usar' },
   { id: 'work', label: '🔒 Ocultar datos' },
   { id: 'recover', label: '🔄 Recuperar' },
-  { id: 'how', label: 'Cómo usar' },
   { id: 'privacy', label: 'Privacidad' },
 ];
 
 function App() {
-  const [tab, setTab] = useState('work');
+  const [tab, setTab] = useState('how');
   const [aboutOpen, setAboutOpen] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const [sessionKey, setSessionKey] = useState(0);
@@ -3221,7 +3221,7 @@ function App() {
   const dialogs = useDialog();
   const clearSession = async () => {
     if (!(await dialogs.confirm('¿Borrar el contenido y la llave de esta sesión? No elimina archivos descargados ni el portapapeles.', { ok: 'Borrar sesión', danger: true }))) return;
-    setLastResult(null); setSessionKey(key => key + 1); setTab('work'); setAboutOpen(false); setMenuOpen(false);
+    setLastResult(null); setSessionKey(key => key + 1); setTab('how'); setAboutOpen(false); setMenuOpen(false);
   };
   const tabRefs = useRef([]);
   // Header y nav en un solo bloque sticky: así ninguna pestaña se dibuja sobre el contenido al variar la altura del header.

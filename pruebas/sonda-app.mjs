@@ -75,14 +75,16 @@ async function main() {
   for (const t of ['Cómo usar', 'Ocultar datos', 'Privacidad'])
     check('pestana presente: ' + t, tabs.some(x => x.includes(t)), 'tabs=' + tabs.join(' / '));
   check('pestana Recuperar presente', tabs.some(x => x.includes('Recuperar')));
-  check('la pestana de trabajo fusiona Texto y Documento (textarea + input de archivo juntos)',
-    await evalJs(`(()=>{const ta=document.querySelector('#input-text');return !!ta && !!ta.closest('section').querySelector('input[type=file]')})()`));
+  check('«Cómo usar» es la primera pestaña y la de llegada', tabs[0] === 'Cómo usar' && await evalJs(`document.querySelector('[role=tab][aria-selected=true]').innerText.trim()==='Cómo usar'`));
 
-  // --- Flujo real: ya aterriza en la pestaña de trabajo; pegar, anonimizar ---
+  // --- Flujo real: ir a la pestaña de trabajo; pegar, anonimizar ---
   const fueATexto = await evalJs(`(()=>{
     const b=Array.from(document.querySelectorAll('[role=tab]')).find(x=>/Ocultar datos/.test(x.innerText));
     if(!b) return false; b.click(); return true; })()`);
+  await sleep(300);
   check('navega a la pestana de trabajo (Ocultar datos)', fueATexto && await evalJs(`!!document.querySelector('#input-text')`));
+  check('la pestana de trabajo fusiona Texto y Documento (textarea + input de archivo juntos)',
+    await evalJs(`(()=>{const ta=document.querySelector('#input-text');return !!ta && !!ta.closest('section').querySelector('input[type=file]')})()`));
   await sleep(1200);
 
   const pego = await evalJs(`(()=>{
