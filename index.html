@@ -1250,7 +1250,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 function HowToTab({ onStart }) {
   const steps = [
     { n: '1', icon: '📄', title: 'Pega o sube tu documento',
-      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, usa «Ver un ejemplo ahora»: son 50 textos con datos inventados.',
+      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, pulsa «Elegir un ejemplo»: son 50 textos con datos inventados.',
       tip: 'Los PDF escaneados (fotos) no tienen texto que leer. Conviértelos con una herramienta de tu empresa; no los subas a un convertidor en línea.' },
     { n: '2', icon: '⚙️', title: 'Revisa qué tipos de datos se ocultan (opcional)',
       desc: 'Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. Puedes añadir palabras que siempre deben ocultarse (un proyecto, un cliente) y palabras que pueden quedar visibles (tu empresa, tu ciudad).',
@@ -1269,9 +1269,9 @@ function HowToTab({ onStart }) {
       tip: 'Los archivos descargados y el portapapeles no se borran al cerrar la app; cuida dónde quedan.' },
   ];
   const whyItems = [
-    { icon: '🏢', title: 'Lo que pegas sale de tu empresa', body: 'ChatGPT, Gemini, Claude o Copilot procesan tu texto en servidores de terceros. Según el plan y la configuración, puede quedar almacenado o usarse para entrenar modelos. Un contrato, una nómina o una historia clínica no deberían viajar con nombres y cédulas reales.' },
-    { icon: '⚖️', title: 'La ley te obliga', body: 'Las leyes de protección de datos de Hispanoamérica (Ecuador, Colombia, México, Argentina, Chile, Perú, España…) exigen tratar los datos personales con una finalidad clara y medidas de seguridad. Compartirlos con un proveedor de IA sin control puede acarrear sanciones y pérdida de confianza de clientes y empleados.' },
-    { icon: '✅', title: 'La IA funciona igual sin los datos reales', body: 'Para resumir, redactar, traducir o analizar, el modelo no necesita saber el nombre real del cliente ni su número de cuenta. Cambias los datos por etiquetas, obtienes la respuesta y los recuperas al final. Nadie fuera de tu equipo ve la información real.' },
+    { icon: '🏢', kicker: 'Riesgo', accent: '#b00020', accentBg: '#fff0f1', title: 'Lo que pegas sale de tu empresa', body: 'ChatGPT, Gemini, Claude o Copilot procesan tu texto en servidores de terceros. Según el plan y la configuración, puede quedar almacenado o usarse para entrenar modelos. Un contrato, una nómina o una historia clínica no deberían viajar con nombres y cédulas reales.' },
+    { icon: '⚖️', kicker: 'Obligación', accent: '#2A5B8C', accentBg: '#eaf1f8', title: 'La ley te obliga', body: 'Las leyes de protección de datos de Hispanoamérica (Ecuador, Colombia, México, Argentina, Chile, Perú, España…) exigen tratar los datos personales con una finalidad clara y medidas de seguridad. Compartirlos con un proveedor de IA sin control puede acarrear sanciones y pérdida de confianza de clientes y empleados.' },
+    { icon: '✅', kicker: 'Solución', accent: '#1b7f3b', accentBg: '#e8f5e9', title: 'La IA funciona igual sin los datos reales', body: 'Para resumir, redactar, traducir o analizar, el modelo no necesita saber el nombre real del cliente ni su número de cuenta. Cambias los datos por etiquetas, obtienes la respuesta y los recuperas al final. Nadie fuera de tu equipo ve la información real.' },
   ];
   const glossary = [
     ['Dato personal o sensible', 'Cualquier información que identifica a una persona o permite identificarla: nombre, cédula, teléfono, correo, dirección, cuenta bancaria, fecha de nacimiento, datos de salud.'],
@@ -1306,17 +1306,27 @@ function HowToTab({ onStart }) {
     <div className="space-y-8">
       <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6" aria-labelledby="why-title">
         <h2 id="why-title" className="mb-2 text-xl font-bold text-[#222222]">Por qué anonimizar antes de usar una IA</h2>
-        <p className="mb-5 text-sm text-[#333333]">Cada vez que pegas un documento en ChatGPT, Gemini o Claude, estás entregando a un tercero los nombres, cédulas, teléfonos y cuentas de tus clientes y empleados. Esta app los cambia por etiquetas antes de que salgan, y te los devuelve después.</p>
+        <p className="mb-5 max-w-3xl text-sm text-[#333333]">Cada vez que pegas un documento en ChatGPT, Gemini o Claude, estás entregando a un tercero los nombres, cédulas, teléfonos y cuentas de tus clientes y empleados. Esta app los cambia por etiquetas antes de que salgan, y te los devuelve después.</p>
         <div className="grid gap-4 md:grid-cols-3">
-          {whyItems.map(w => (
-            <div key={w.title} className="p-1">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="text-xl" aria-hidden="true">{w.icon}</span>
-                <h3 className="font-semibold text-[#222222]">{w.title}</h3>
+          {whyItems.map((w, i) => (
+            <article key={w.title} className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-[#e5e5e5] bg-white p-5 shadow-sm">
+              <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: w.accent }} />
+              <div className="mb-3 flex items-center gap-3">
+                <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl" style={{ backgroundColor: w.accentBg }}>{w.icon}</span>
+                <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: w.accent }}>{w.kicker}</span>
               </div>
-              <p className="text-sm leading-relaxed text-[#333333]">{w.body}</p>
-            </div>
+              <h3 className="text-base font-bold leading-snug text-[#222222]">{w.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[#333333]">{w.body}</p>
+            </article>
           ))}
+        </div>
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-[#e5e5e5] bg-white p-5 shadow-sm md:flex-row md:items-start">
+          <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e8f5e9] text-xl">🔐</span>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-[#222222]">Por qué es seguro: tu texto no sale de tu navegador</h3>
+            <p className="mt-1 text-sm leading-relaxed text-[#333333]">No hay ningún servidor que reciba, guarde o analice tu contenido. Todo ocurre en tu computador y se borra al cerrar la pestaña. Lo puedes comprobar: con F12 → pestaña Red verás que no sale ninguna petición mientras anonimizas.</p>
+            <p className="mt-1 text-xs text-[#6b6b6b]">Las librerías y fuentes sí se cargan desde internet al abrir la app. Las descargas y el portapapeles quedan fuera de este control.</p>
+          </div>
         </div>
       </section>
 
@@ -1341,14 +1351,6 @@ function HowToTab({ onStart }) {
             </li>
           ))}
         </ol>
-        <details className="mt-6 rounded-2xl border border-[#b00020]/20 bg-[#fafafa] p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-[#222222]">¿Por qué es seguro? Tu texto no sale de tu navegador.</summary>
-          <p className="mt-2 text-sm leading-relaxed text-[#333333]">
-            No hay ningún servidor que reciba, guarde o analice tu contenido; todo ocurre en tu dispositivo y se borra al cerrar la pestaña.
-            Lo puedes comprobar: con F12 → pestaña Red verás que no sale ninguna petición mientras ocultas datos.
-            Las librerías y fuentes sí se cargan desde internet al abrir la app. Las descargas y el portapapeles quedan fuera de este control.
-          </p>
-        </details>
       </section>
 
       <Collapsible open={showCats} onToggle={() => setShowCats(v => !v)} id="howto-cats" title="Qué tipos de datos detecta" subtitle={CATS.length + ' tipos. Los marcados con «Activo» vienen seleccionados al empezar.'}>
@@ -2828,14 +2830,6 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
     announce('Plantilla cargada: ' + template.name);
   };
 
-  const trySample = () => {
-    setInputText(SAMPLE_TEXT); setSourceName(null);
-    const r = runAnonymize(SAMPLE_TEXT, activeCats, customTerms, { whitelist });
-    setResult(r); setKeySaved(false); if (setLastResult) setLastResult(r);
-    announce('Ejemplo procesado: ' + r.reps.length + ' datos sustituidos.');
-    setTimeout(() => outputRef.current && outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  };
-
   const clear = async () => {
     if (!(await dialogs.confirm('¿Borrar el texto y el resultado? Si no guardaste la llave de recuperación, no podrás recuperar los originales.', { ok: 'Borrar', danger: true }))) return;
     setInputText(''); setSourceName(null); invalidate(); setCustomTerms(''); setLastResult(null); setViewerData(null);
@@ -2940,12 +2934,9 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
           <div className="min-w-0 max-w-2xl">
             <h2 id="start-title" className="text-lg font-bold text-[#222222]">Pásalo por aquí antes de pegarlo en una IA</h2>
             <p className="mt-1 text-sm text-[#444444]">Cambiamos nombres, teléfonos, cuentas y claves por etiquetas. Luego los recuperas. Nada sale de tu navegador.</p>
-            <p className="mt-1 text-xs text-[#6b6b6b]">Prueba primero con un ejemplo: son 50 textos con datos inventados.</p>
+            <p className="mt-1 text-xs text-[#6b6b6b]">Prueba primero con un ejemplo: 50 textos con datos inventados, por área.</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <AppButton variant="secondary" className="border-[#222222]" onClick={trySample}>Ver un ejemplo ahora</AppButton>
-            <button type="button" onClick={() => setShowTemplates(true)} disabled={uploading} className="text-sm font-semibold text-[#333333] underline-offset-2 hover:underline disabled:text-[#8a8a8a]">Más ejemplos: contratos, nómina, ventas…</button>
-          </div>
+          <AppButton variant="secondary" className="border-[#222222]" onClick={() => setShowTemplates(true)} disabled={uploading}>Elegir un ejemplo</AppButton>
         </div>
       </section>
 
@@ -2980,7 +2971,7 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
           <span className="text-xs text-[#6b6b6b]">{inputText.trim() ? inputText.length.toLocaleString() + ' caracteres' : ''}</span>
           <span className="flex items-center gap-3 flex-wrap">
-            {!inputText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega un texto o <button type="button" onClick={trySample} className="font-semibold text-[#222222] underline">ve un ejemplo</button> para activar el botón →</span> : null}
+            {!inputText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega un texto o <button type="button" onClick={() => setShowTemplates(true)} className="font-semibold text-[#222222] underline">elige un ejemplo</button> para activar el botón →</span> : null}
             <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>Ocultar datos sensibles</AppButton>
           </span>
         </div>

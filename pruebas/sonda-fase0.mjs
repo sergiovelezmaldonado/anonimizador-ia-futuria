@@ -19,7 +19,8 @@ check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`/Cómo us
 check('«Empezar ahora» lleva a la vista de trabajo', await click('Empezar ahora')); await pause(300);
 check('vista de trabajo visible', await ev(`!!document.querySelector('#input-text')`));
 check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===4`));
-check('botón Ver un ejemplo ahora', await click('Ver un ejemplo ahora')); await pause(1200);
+const pickExample = async () => { const ok = await click('Elegir un ejemplo'); await pause(900); await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');const b=d&&d.querySelector('.grid button');b&&b.click();})()`); await pause(700); await click('Ocultar datos sensibles'); await pause(600); return ok; };
+check('botón Elegir un ejemplo abre la ventana y procesa', await pickExample());
 check('resultado con etiquetas', await ev(`(document.body.innerText.match(/\\[[A-Z_]+_\\d+\\]/g)||[]).length>=6`));
 check('semáforo no bloquea el ejemplo (categorías inactivas solo avisan)', await ev(`!document.querySelector('input[data-review]').disabled`));
 check('aviso de tipos desactivados visible, sin jerga', await ev(`/Quedan posibles .* sin ocultar/i.test(document.body.innerText) && !/seudonimiz|heur[ií]stic/i.test(document.querySelector('[role=region][aria-label="Estado de revisión"]').innerText)`));
@@ -43,7 +44,7 @@ const termsH = await ev(`document.querySelector('#custom-terms').getBoundingClie
 check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto=' + termsH);
 check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
 check('títulos numerados explican cada bloque sin abrir nada', await ev(`/1 · Pega tu texto/.test(document.body.innerText) && /2 · Qué tipos de datos se ocultan/.test(document.body.innerText) && /3 · Oculta siempre estas palabras/.test(document.body.innerText) && /4 · Deja visibles estas palabras/.test(document.body.innerText)`));
-check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Ver un ejemplo ahora/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
+check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Elegir un ejemplo/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
 // diálogos propios: Limpiar no usa window.confirm
 await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
 await click('Limpiar'); await pause(150);
@@ -74,7 +75,7 @@ check('valores restaurados resaltados', await ev(`document.querySelectorAll('pre
 await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 2, mobile: true }); await pause(300);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(300);
 // Al cambiar de pestaña la vista de trabajo se vuelve a montar: se procesa de nuevo el ejemplo.
-await click('Ver un ejemplo ahora'); await pause(500);
+await pickExample();
 await click('Ver como documento'); await pause(400);
 const padding = await ev(`(()=>{const d=[...document.querySelectorAll('[role=dialog]')].find(x=>/Documento seudonimizado/.test(x.getAttribute('aria-label')||''));const el=d&&d.querySelector('.max-w-3xl');return el?parseFloat(getComputedStyle(el).paddingLeft):-1})()`);
 check('visor en móvil con margen fluido (<40px a 360px)', padding > 0 && padding < 40, 'padding=' + padding);
