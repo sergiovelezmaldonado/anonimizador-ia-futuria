@@ -63,8 +63,8 @@ async function main() {
 
   // --- ventana emergente de plantillas ---
   const scrollAntes = await ev('window.scrollY');
-  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir una plantilla por área/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
-  check('existe el boton "Elegir una plantilla por área"', abrio);
+  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Más ejemplos/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
+  check('existe el boton "Más ejemplos"', abrio);
   await sleep(1500);
 
   const modal = await ev(`JSON.stringify((()=>{
@@ -107,7 +107,7 @@ async function main() {
   check('se restaura el scroll del fondo', (await ev('document.body.style.overflow')) !== 'hidden', null);
 
   // seleccionar una plantilla sigue funcionando (sin texto previo no pide confirmación)
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir una plantilla por área/i.test(x.innerText));b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Más ejemplos/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1200);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelector('.grid button'); b&&b.click();})()`);
@@ -118,7 +118,7 @@ async function main() {
 
   // con texto previo, elegir otra plantilla pide confirmación con diálogo propio (Reemplazar)
   await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir una plantilla por área/i.test(x.innerText));b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Más ejemplos/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1000);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelectorAll('.grid button')[1]; b&&b.click();})()`);

@@ -154,7 +154,7 @@ const CATS = [
     ]
   },
   {
-    id: 'url', short: 'Direcciones web',
+    id: 'url', short: 'Enlaces web',
     label: 'URLs y dominios',
     ex: 'https://empresa.com/docs/contrato',
     color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', tag: 'URL', icon: '🔗',
@@ -189,7 +189,7 @@ const CATS = [
     ]
   },
   {
-    id: 'ip', short: 'IP',
+    id: 'ip', short: 'Direcciones IP',
     label: 'Direcciones IP y MAC',
     ex: '192.168.1.105 · fe80::1 · 00:1A:2B:3C:4D:5E',
     color: '#92400e', bg: '#fffbeb', border: '#fde68a', tag: 'IP', icon: '🖧',
@@ -302,7 +302,7 @@ const CATS = [
     ]
   },
   {
-    id: 'address', short: 'Direcciones',
+    id: 'address', short: 'Direcciones postales',
     label: 'Direcciones físicas (heurístico)',
     ex: 'Av. República #123, Calle Bolívar 45',
     color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', tag: 'DIRECCION', icon: '📍',
@@ -570,7 +570,8 @@ Director de Tecnología — Sistemas Integrados del Norte S.A.
 
 // ─── Componentes UI base ──────────────────────────────────────────────────────
 function AppButton({ children, onClick, variant = "primary", className = "", type = "button", disabled = false }) {
-  const base = "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
+  // Apagado = gris neutro (no rosa): «todavía no», nunca «error».
+  const base = "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-[#d4d4d4] disabled:bg-[#ececec] disabled:text-[#8a8a8a] disabled:hover:bg-[#ececec]";
   const styles = variant === "primary"
     ? "bg-[#b00020] text-white hover:bg-[#8c001a]"
     : "border border-[#9a9a9a] bg-white text-[#333333] hover:bg-[#fff5f6]";
@@ -2682,6 +2683,8 @@ function GrowingTextarea({ value, onChange, minRows = 3, maxRows = 14, className
 }
 
 function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, whitelist, onWhitelist }) {
+  const activeIds = cats.filter(c => c.on).map(c => c.id).sort().join(',');
+  const activePreset = PRESETS.find(p => [...new Set([...p.cats, ...cats.filter(c => c.alwaysOn).map(c => c.id)])].sort().join(',') === activeIds);
   const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
   const ordered = [...cats.filter(c => c.on), ...cats.filter(c => !c.on)];
   return (
@@ -2689,16 +2692,22 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 id="cats-title" className="font-bold text-[#222222]"><span className="text-[#b00020]">2 ·</span> Qué tipos de datos se ocultan</h2>
-            <p className="mt-1 text-sm text-[#6b6b6b]">Los habituales ya están marcados. Toca uno para activarlo o quitarlo.</p>
+            <h2 id="cats-title" className="font-bold text-[#222222]"><span className="text-[#6b6b6b]">2 ·</span> Qué tipos de datos se ocultan</h2>
+            <p className="mt-1 text-sm text-[#6b6b6b]">Los habituales ya están marcados. Marca o desmarca los que necesites.</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Atajos">
-            {PRESETS.map(p => (
-              <button key={p.id} type="button" onClick={() => onPreset(p)} title={p.desc}
-                className="rounded-full border border-[#d4d4d4] bg-white px-3 py-1.5 text-xs font-semibold text-[#333333] hover:border-[#b00020] hover:text-[#b00020] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
-                {p.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Conjuntos predefinidos">
+            <span className="text-xs text-[#6b6b6b]">Conjunto:</span>
+            {PRESETS.map(p => {
+              const selected = activePreset && activePreset.id === p.id;
+              return (
+                <button key={p.id} type="button" role="radio" aria-checked={!!selected} onClick={() => onPreset(p)} title={p.desc}
+                  className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
+                    selected ? 'border-[#222222] bg-[#222222] text-white' : 'border-[#d4d4d4] bg-white text-[#333333] hover:border-[#222222]')}>
+                  {p.label}
+                </button>
+              );
+            })}
+            {!activePreset ? <span className="text-xs text-[#6b6b6b]">Personalizado</span> : null}
           </div>
         </div>
         <div id="cats-body" className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Tipos de datos">
@@ -2706,10 +2715,10 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
             <button key={c.id} type="button" onClick={() => onToggle(c.id)} aria-pressed={c.on} disabled={c.alwaysOn} aria-label={c.label}
               title={c.alwaysOn ? 'Siempre activo. Las claves nunca deben salir.' : c.label + ' — ej.: ' + c.ex}
               className={cn('inline-flex min-h-[36px] items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
-                c.on ? 'border-transparent text-[#222222]' : 'border-dashed border-[#bdbdbd] bg-white text-[#8a8a8a] hover:border-[#6b6b6b] hover:text-[#333333]',
+                c.on ? 'border-transparent text-[#222222]' : 'border-[#d4d4d4] bg-white text-[#555555] hover:border-[#6b6b6b]',
                 c.alwaysOn && 'cursor-default')}
               style={c.on ? { backgroundColor: c.bg, boxShadow: 'inset 0 0 0 1px ' + c.border } : undefined}>
-              <span aria-hidden="true" className="text-xs font-bold" style={{ color: c.on ? c.color : '#bdbdbd' }}>{c.on ? '✓' : '+'}</span>
+              <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] font-bold" style={c.on ? { borderColor: c.color, backgroundColor: c.color, color: '#fff' } : { borderColor: '#9a9a9a', backgroundColor: '#fff' }}>{c.on ? '✓' : ''}</span>
               <span>{c.short || c.label}</span>
               {c.alwaysOn ? <span aria-hidden="true" className="text-xs">🔒</span> : null}
             </button>
@@ -2718,13 +2727,13 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
       </div>
       <div className="grid gap-5 md:grid-cols-2">
         <div>
-          <label htmlFor="custom-terms" className="block font-bold text-[#222222]"><span className="text-[#b00020]">3 ·</span> Oculta siempre estas palabras</label>
+          <label htmlFor="custom-terms" className="block font-bold text-[#222222]"><span className="text-[#6b6b6b]">3 ·</span> Oculta siempre estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
           <p id="custom-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Nombres, proyectos o códigos que la app no detecta sola. Uno por línea.</p>
           <GrowingTextarea id="custom-terms" className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
             placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ"} aria-describedby="custom-help" />
         </div>
         <div>
-          <label htmlFor="whitelist" className="block font-bold text-[#222222]"><span className="text-[#b00020]">4 ·</span> Deja visibles estas palabras</label>
+          <label htmlFor="whitelist" className="block font-bold text-[#222222]"><span className="text-[#6b6b6b]">4 ·</span> Deja visibles estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
           <p id="whitelist-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Lo que la IA sí puede ver: tu empresa, tu ciudad, un correo público. Uno por línea.</p>
           <GrowingTextarea id="whitelist" className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
             placeholder={"Mi Empresa S.A.\nventas@miempresa.com\nBogotá"} aria-describedby="whitelist-help" />
@@ -2891,16 +2900,16 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
       {showTemplates ? <TemplatesPanel onSelect={loadTemplate} onClose={() => setShowTemplates(false)} /> : null}
 
       {/* Bloque 1 — arranque: qué es esto y cómo probarlo sin arriesgar nada */}
-      <section className="rounded-[28px] border border-[#f3c6cc] bg-[#fff5f6] px-6 py-5" aria-labelledby="start-title">
+      <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] px-6 py-5" aria-labelledby="start-title">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 max-w-2xl">
             <h2 id="start-title" className="text-lg font-bold text-[#222222]">Pásalo por aquí antes de pegarlo en una IA</h2>
             <p className="mt-1 text-sm text-[#444444]">Cambiamos nombres, teléfonos, cuentas y claves por etiquetas. Luego los recuperas. Nada sale de tu navegador.</p>
-            <p className="mt-1 text-xs text-[#6b6b6b]">50 ejemplos con datos ficticios para probar sin arriesgar nada.</p>
+            <p className="mt-1 text-xs text-[#6b6b6b]">Prueba primero con un ejemplo: son 50 textos con datos inventados.</p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <AppButton variant={inputText ? 'secondary' : 'primary'} onClick={trySample}>Ver un ejemplo ahora</AppButton>
-            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>Elegir una plantilla por área ▾</AppButton>
+            <AppButton variant="secondary" onClick={trySample}>Ver un ejemplo ahora</AppButton>
+            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>Más ejemplos: contratos, nómina, ventas…</AppButton>
           </div>
         </div>
       </section>
@@ -2909,7 +2918,7 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
       <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6" aria-labelledby="input-title"
         onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
         <div className="mb-3 flex items-center justify-between gap-4 flex-wrap">
-          <h2 id="input-title" className="font-bold text-[#222222]"><span className="text-[#b00020]">1 ·</span> Pega tu texto o sube un archivo</h2>
+          <h2 id="input-title" className="font-bold text-[#222222]"><span className="text-[#6b6b6b]">1 ·</span> Pega tu texto o sube un archivo</h2>
           <div className="flex items-center gap-2 flex-wrap">
             <AppButton variant="secondary" disabled={uploading} onClick={() => fileInputRef.current && fileInputRef.current.click()} aria-describedby="file-limits">
               {uploading ? '⏳ Procesando…' : '↑ Subir archivo'}
@@ -2934,10 +2943,11 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
           </div>
         ) : null}
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-          <span className="text-xs text-[#6b6b6b]">
-            {inputText.trim() ? inputText.length.toLocaleString() + ' caracteres' : <span>Pega un texto o <button type="button" onClick={trySample} className="font-semibold text-[#b00020] underline">ve un ejemplo</button> para activar el botón.</span>}
+          <span className="text-xs text-[#6b6b6b]">{inputText.trim() ? inputText.length.toLocaleString() + ' caracteres' : ''}</span>
+          <span className="flex items-center gap-3 flex-wrap">
+            {!inputText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega un texto o <button type="button" onClick={trySample} className="font-semibold text-[#222222] underline">ve un ejemplo</button> para activar el botón →</span> : null}
+            <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>Ocultar datos sensibles</AppButton>
           </span>
-          <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>Ocultar datos sensibles</AppButton>
         </div>
       </section>
 
@@ -3097,12 +3107,12 @@ function RecoverTab({ lastResult }) {
     <div className="space-y-6">
       <LiveStatus message={status} />
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <h2 className="text-xl font-bold text-[#222222] mb-1">Vuelve a poner los datos reales en la respuesta de la IA</h2>
+        <h2 className="text-xl font-bold text-[#222222] mb-1">Recuperar: vuelve a poner los datos reales en la respuesta de la IA</h2>
         <p className="text-sm text-[#6b6b6b]">Pega lo que te contestó la IA. Cada etiqueta como <span className="font-mono">[PERSONA_1]</span> se cambia por el dato real, aunque el modelo la haya escrito distinto.</p>
       </div>
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b6b6b] mb-3" id="key-source">Qué llave usar</p>
+        <p className="font-bold text-[#222222] mb-3" id="key-source"><span className="text-[#6b6b6b]">1 ·</span> Elige la llave</p>
         <div className="mb-4 flex gap-3 flex-wrap" role="group" aria-labelledby="key-source">
           <button type="button" onClick={() => { setMode('auto'); setRecovered(null); }} aria-pressed={mode === 'auto'}
             className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'auto' ? "border-2 border-[#222222] bg-[#fafafa] text-[#222222]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
@@ -3131,10 +3141,10 @@ function RecoverTab({ lastResult }) {
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
         <div className="mb-2 flex items-center gap-2">
-          <label htmlFor="modified-text" className="text-sm font-semibold text-[#222222]">Pega la respuesta de la IA</label>
+          <label htmlFor="modified-text" className="font-bold text-[#222222]"><span className="text-[#6b6b6b]">2 ·</span> Pega la respuesta de la IA</label>
         </div>
         <textarea id="modified-text" rows={12} value={modifiedText} onChange={e => { setModifiedText(e.target.value); setRecovered(null); }} className={fieldClass}
-          placeholder="Pega aquí lo que te contestó ChatGPT, Claude o Gemini. Las etiquetas como [PERSONA_1] se cambiarán por los datos reales." />
+          placeholder="Pega aquí lo que te contestó ChatGPT, Claude o Gemini. Las etiquetas entre corchetes se cambiarán por los datos reales." />
         <div className="mt-3 flex items-center gap-3 flex-wrap">
           <AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>Recuperar datos originales</AppButton>
           {!modifiedText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega una respuesta para activar el botón.</span> : !hasMappingSource ? <span className="text-xs text-[#6b6b6b]">Elige una llave arriba para activar el botón.</span> : null}
@@ -3263,7 +3273,7 @@ function App() {
       </main>
 
       <footer className="border-t border-[#e5e5e5] py-6 text-center text-xs text-[#6b6b6b]">
-        FuturIA Anonimizador IA v{APP_VERSION} — gratuito · procesamiento local · sin historial · seudonimización reversible que requiere revisión manual.
+        FuturIA Anonimizador IA v{APP_VERSION} — gratis · todo ocurre en tu navegador · no guarda nada · revisa siempre el resultado.
         {' · '}
         <a href="https://futuria.substack.com/" target="_blank" rel="noreferrer" className="text-[#b00020] hover:underline">futuria.substack.com</a>
       </footer>
