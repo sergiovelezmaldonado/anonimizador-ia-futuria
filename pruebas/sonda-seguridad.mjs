@@ -1,6 +1,6 @@
 // Sonda de seguridad y privacidad (Fase 0): control de exportación, descargas, portapapeles,
 // visor, recuperación, borrado de sesión, red y almacenamiento. Adaptada a la interfaz nueva:
-// una pestaña de trabajo ('🔒 Ocultar datos'), diálogos propios [role=alertdialog] en lugar de
+// una pestaña de trabajo ('🔒 Anonimizar texto'), diálogos propios [role=alertdialog] en lugar de
 // alert()/confirm() nativos, e impresión mediante <iframe> oculto (no window.open).
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +41,7 @@ try {
   for(let n=0;n<80;n++){if(await ev('!!document.querySelector("#input-text")'))break;await pause(250);}
   // Los diálogos nativos no deben usarse: si alguno se invoca, queda registrado.
   await ev(`window.__native={alert:0,confirm:0};window.alert=()=>{window.__native.alert++};window.confirm=()=>{window.__native.confirm++;return true};`);
-  await tab('Ocultar datos');
+  await tab('Anonimizar texto');
   await fill('#input-text','Paciente: María García. Correo: maria@ejemplo.test.');
   await click('Ocultar datos sensibles'); await pause(300);
   check('sin falso porcentaje de riesgo', !/riesgo residual:\s*\d+%/i.test(await ev('document.body.innerText')));
@@ -104,7 +104,7 @@ try {
   check('Documento comparte el mapa con Recuperar', await ev('/etiquetas de tu último texto/i.test(document.body.innerText)'));
   await fill('#modified-text','Respuesta: [PERSONA_1] y [EMAIL_1].'); await click('Recuperar datos originales'); await pause(200);
   check('recuperación de Documento restituye nombres y correos', await ev('document.body.innerText.includes("Nuria Ramos") && document.body.innerText.includes("nuria@ejemplo.test")'));
-  await tab('Ocultar datos');
+  await tab('Anonimizar texto');
   await fill('#input-text','Paciente: María\tGarcía.'); await click('Ocultar datos sensibles'); await pause(300);
   await ev('navigator.clipboard.writeText=text=>{window.__mapCopied=text;return Promise.resolve()}');
   await click('Copiar llave'); await waitDialog(); await dialogButton('Copiar llave'); await pause(300);

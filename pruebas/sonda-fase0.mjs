@@ -50,6 +50,15 @@ await click('Limpiar'); await pause(150);
 check('Limpiar abre diálogo propio, no confirm nativo', await ev(`window.__nativeConfirm===0 && !!document.querySelector('[role=alertdialog]')`));
 await ev(`[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/Borrar/.test(b.textContent)).click()`); await pause(150);
 check('diálogo cerrado y texto borrado', await ev(`!document.querySelector('[role=alertdialog]') && document.querySelector('#input-text').value===''`));
+// «Cómo usar»: pasos en vertical, «por qué» antes del cómo, categorías y glosario plegados
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Cómo usar/.test(b.textContent)).click()`); await pause(300);
+check('los 6 pasos están en una sola columna vertical', await ev(`(()=>{const li=[...document.querySelectorAll('ol li')];if(li.length!==6)return false;const xs=new Set(li.map(l=>Math.round(l.getBoundingClientRect().left)));const ys=li.map(l=>l.getBoundingClientRect().top);return xs.size===1&&ys.every((y,i)=>i===0||y>ys[i-1])})()`));
+check('«Por qué anonimizar» aparece antes de «Cómo usar»', await ev(`(()=>{const w=document.querySelector('#why-title'),h=document.querySelector('#howto-title');return w&&h&&w.getBoundingClientRect().top<h.getBoundingClientRect().top})()`));
+check('categorías y glosario plegados al llegar', await ev(`!document.querySelector('#howto-cats') && !document.querySelector('#howto-glossary')`));
+await ev(`document.querySelector('[aria-controls="howto-glossary"]').click()`); await pause(150);
+check('el glosario se despliega y explica «Llave» y «Etiqueta»', await ev(`(()=>{const g=document.querySelector('#howto-glossary');return g&&/Llave/.test(g.innerText)&&/Etiqueta/.test(g.innerText)&&!/PII|Seudonimizaci|heur[ií]stic/.test(g.innerText)})()`));
+check('pestañas con nombres que dicen qué hacen', await ev(`(()=>{const t=[...document.querySelectorAll('[role=tab]')].map(x=>x.textContent);return t.some(x=>/Anonimizar texto/.test(x))&&t.some(x=>/Recuperar datos reales/.test(x))})()`));
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(300);
 // Recuperar tolerante en la interfaz
 await ev(`document.querySelector('#input-text').focus()`);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#input-text');s.call(t,'Cliente: Ana Ruiz, correo ana@x.test, cel 0991234567');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -63,7 +72,7 @@ check('indica etiquetas reparadas', await ev(`/reparadas/.test(document.body.inn
 check('valores restaurados resaltados', await ev(`document.querySelectorAll('pre mark').length>=3`));
 // móvil: visor legible a 360px
 await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 2, mobile: true }); await pause(300);
-await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Ocultar datos/.test(b.textContent)).click()`); await pause(300);
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(300);
 // Al cambiar de pestaña la vista de trabajo se vuelve a montar: se procesa de nuevo el ejemplo.
 await click('Ver un ejemplo ahora'); await pause(500);
 await click('Ver como documento'); await pause(400);

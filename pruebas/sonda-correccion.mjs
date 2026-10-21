@@ -43,7 +43,7 @@ async function main() {
   check('reconstructPageText existe', (await ev('typeof reconstructPageText')) === 'function');
 
   // --- limite visible en la UI (pestaña de trabajo, span#file-limits) ---
-  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
   await sleep(1200);
   const zona = String(await ev(`document.querySelector('#file-limits')?.innerText || ''`));
   check('la zona de carga anuncia el limite', /hasta 25 MB y 300 páginas/i.test(zona), zona);
@@ -94,7 +94,7 @@ async function main() {
   await sleep(300);
   await send('Page.navigate', { url: URL_APP });
   await sleep(8000);
-  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
   await sleep(1200);
   await ev(`window.__nativeAlert=0;window.alert=()=>{window.__nativeAlert++};`);
   await ev(`(()=>{

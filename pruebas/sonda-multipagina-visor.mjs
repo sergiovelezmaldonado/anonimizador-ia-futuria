@@ -1,5 +1,5 @@
 // Verifica que las 12 paginas del PDF llegan hasta el resultado anonimizado.
-// Fase 0: la carga vive en la pestaña de trabajo ('🔒 Ocultar datos'); el texto extraido
+// Fase 0: la carga vive en la pestaña de trabajo ('🔒 Anonimizar texto'); el texto extraido
 // se vuelca en #input-text, se procesa con '🔒 Ocultar datos sensibles' y el visor se abre
 // con '🔎 Ver como documento'. Los marcadores se comprueban DENTRO del visor modal.
 const CDP = 'http://127.0.0.1:9334';
@@ -27,7 +27,7 @@ async function main() {
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 950, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: URL_APP });
   await sleep(9000);
-  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
   await sleep(1500);
 
   const b64 = readFileSync('pruebas/prueba-multipagina.pdf').toString('base64');

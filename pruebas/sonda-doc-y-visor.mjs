@@ -1,7 +1,7 @@
 // Verifica: (1) el .doc legado da un mensaje util en español en vez del error
 // tecnico de mammoth, (2) el .docx sigue funcionando, (3) el visor de documento
 // se abre desde el resultado de la pestaña de trabajo ('🔎 Ver como documento').
-// Fase 0: la carga vive en la pestaña '🔒 Ocultar datos'; los avisos son
+// Fase 0: la carga vive en la pestaña '🔒 Anonimizar texto'; los avisos son
 // diálogos propios [role=alertdialog] (#dlg-msg) en lugar de alert().
 const CDP = 'http://127.0.0.1:9334';
 const URL_APP = 'http://localhost:5199/';
@@ -38,7 +38,7 @@ async function main() {
   async function irATrabajo() {
     await send('Page.navigate', { url: URL_APP });
     await sleep(8500);
-    await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+    await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
     await sleep(1200);
     await ev(`window.__nativeAlert=0;window.alert=()=>{window.__nativeAlert++};`);
   }

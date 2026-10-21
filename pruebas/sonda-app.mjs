@@ -1,6 +1,6 @@
 // Sonda CDP del Anonimizador IA: carga, estilos, y flujo REAL de anonimizacion.
 // Requiere: servidor estatico en 5199 y Chrome headless con --remote-debugging-port=9334
-// Fase 0: una sola pestaña de trabajo ('🔒 Ocultar datos', fusiona Texto+Documento),
+// Fase 0: una sola pestaña de trabajo ('🔒 Anonimizar texto', fusiona Texto+Documento),
 // etiquetas del resultado como <button class="anon"> y <mark class="anon"> en la tabla.
 const URL_APP = 'http://localhost:5199/';
 const CDP = 'http://127.0.0.1:9334';
@@ -72,14 +72,14 @@ async function main() {
 
   // --- Pestanas esperadas (patrón tablist de la Fase 0) ---
   const tabs = JSON.parse(await evalJs('JSON.stringify(Array.from(document.querySelectorAll("[role=tablist] [role=tab]")).map(b=>b.innerText.trim()))'));
-  for (const t of ['Cómo usar', 'Ocultar datos', 'Privacidad'])
+  for (const t of ['Cómo usar', 'Anonimizar texto', 'Privacidad'])
     check('pestana presente: ' + t, tabs.some(x => x.includes(t)), 'tabs=' + tabs.join(' / '));
   check('pestana Recuperar presente', tabs.some(x => x.includes('Recuperar')));
   check('«Cómo usar» es la primera pestaña y la de llegada', tabs[0] === 'Cómo usar' && await evalJs(`document.querySelector('[role=tab][aria-selected=true]').innerText.trim()==='Cómo usar'`));
 
   // --- Flujo real: ir a la pestaña de trabajo; pegar, anonimizar ---
   const fueATexto = await evalJs(`(()=>{
-    const b=Array.from(document.querySelectorAll('[role=tab]')).find(x=>/Ocultar datos/.test(x.innerText));
+    const b=Array.from(document.querySelectorAll('[role=tab]')).find(x=>/Anonimizar texto/.test(x.innerText));
     if(!b) return false; b.click(); return true; })()`);
   await sleep(300);
   check('navega a la pestana de trabajo (Ocultar datos)', fueATexto && await evalJs(`!!document.querySelector('#input-text')`));

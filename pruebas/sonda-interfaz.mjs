@@ -38,7 +38,7 @@ async function main() {
   check('la app arranca sin excepciones', errs.length === 0, errs.join(' | '));
 
   // --- pestaña de trabajo (aterriza ahí) y abrir el panel de ajustes colapsado ---
-  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
   await sleep(1000);
   check('los campos de palabras propias están visibles sin desplegar nada', await ev(`['#custom-terms','#whitelist'].every(id=>{const t=document.querySelector(id);return t&&t.offsetParent!==null})`));
   check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Qué tipos de datos se ocultan/.test(document.querySelector('#cats-title')?.innerText||'')`));

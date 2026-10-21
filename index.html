@@ -1250,32 +1250,98 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 function HowToTab({ onStart }) {
   const steps = [
     { n: '1', icon: '📄', title: 'Pega o sube tu documento',
-      desc: 'En «Ocultar datos», pega el texto o carga un PDF, DOCX, TXT o CSV. También puedes usar las 50 plantillas de ejemplo (todas con datos ficticios) para probar la app. El DOC antiguo requiere conversión a DOCX.',
-      tip: 'Los PDF escaneados necesitan OCR. Para información confidencial, usa una herramienta local autorizada por tu organización; no la subas a un OCR online.' },
-    { n: '2', icon: '⚙️', title: 'Ajusta qué ocultar (opcional)',
-      desc: 'Los ajustes recomendados ya vienen activos: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, credenciales y fecha de nacimiento. En «Qué ocultar» puedes usar un ajuste rápido («Identidad sí, cifras no», «Máxima cobertura»), añadir términos propios de tu empresa o una lista blanca de lo que nunca debe ocultarse.',
-      tip: 'Montos, Direcciones, Empresas y Fechas son heurísticas: si las activas, revisa con más cuidado los falsos positivos.' },
-    { n: '3', icon: '🔒', title: 'Pulsa «Ocultar datos sensibles»',
-      desc: 'Cada dato se sustituye por una etiqueta como [EMAIL_1] o [PERSONA_1]; la misma persona recibe siempre la misma etiqueta. El semáforo indica si quedan datos pendientes de las categorías activas, no seguridad garantizada. Revisa el resultado y confirma la revisión; copiar, descargar e imprimir se habilitan después.',
-      tip: 'Toca o pulsa Enter sobre una etiqueta para ver el dato original o dejarlo visible si no identifica a nadie.' },
-    { n: '4', icon: '🔑', title: 'Guarda la llave de recuperación',
-      desc: 'La llave (.tsv) contiene los datos originales y es lo único que permite revertir el texto. Guárdala junto al documento. Si cierras la pestaña sin guardarla, la app te avisa; sin llave no hay recuperación.',
-      tip: 'La llave y el respaldo .doc son CONFIDENCIALES. Nunca los pegues en un modelo de IA.' },
-    { n: '5', icon: '💬', title: 'Procesa con el modelo de IA',
-      desc: '«Copiar para la IA» incluye una instrucción para que el modelo conserve las etiquetas. Haz tu consulta normalmente y copia la respuesta completa, con las etiquetas incluidas. El texto seudonimizado sigue siendo información de tu empresa: aplica la política de datos de tu organización y del proveedor de IA.',
-      tip: 'Aunque el modelo altere una etiqueta ([PERSONA 1], PERSON_1, negritas), la recuperación la repara.' },
-    { n: '6', icon: '🔄', title: 'Recupera el texto original',
-      desc: 'En «Recuperar», pega la respuesta de la IA. En la misma sesión la llave se usa sola; en otra sesión carga el archivo .tsv o pega la tabla del respaldo .doc. Los valores restaurados aparecen resaltados para que compruebes que cayeron en su sitio.',
+      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, usa «Ver un ejemplo ahora»: son 50 textos con datos inventados.',
+      tip: 'Los PDF escaneados (fotos) no tienen texto que leer. Conviértelos con una herramienta de tu empresa; no los subas a un convertidor en línea.' },
+    { n: '2', icon: '⚙️', title: 'Revisa qué tipos de datos se ocultan (opcional)',
+      desc: 'Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. Puedes añadir palabras que siempre deben ocultarse (un proyecto, un cliente) y palabras que pueden quedar visibles (tu empresa, tu ciudad).',
+      tip: 'Montos, direcciones, empresas y fechas se detectan por aproximación: si los activas, revisa el resultado con más cuidado.' },
+    { n: '3', icon: '🔒', title: 'Pulsa «Ocultar datos sensibles» y revisa',
+      desc: 'Cada dato se cambia por una etiqueta como [PERSONA_1] o [EMAIL_1]; la misma persona recibe siempre la misma etiqueta. El aviso de color te dice si queda algo por ocultar. Lee el resultado, marca «Revisé el texto…» y se activan Copiar y Descargar.',
+      tip: 'Toca una etiqueta para ver el dato original o dejarlo visible si no identifica a nadie.' },
+    { n: '4', icon: '🔑', title: 'Guarda la llave',
+      desc: 'La llave es un archivo pequeño con la lista «etiqueta → dato real». Es lo único que permite volver a poner los nombres reales. Guárdala junto al documento. Si cierras la pestaña sin guardarla, la app te avisa.',
+      tip: 'La llave y el Word con los originales son CONFIDENCIALES. Nunca los pegues en una IA.' },
+    { n: '5', icon: '💬', title: 'Pégalo en la IA',
+      desc: '«Copiar para pegar en la IA» añade una instrucción para que el modelo conserve las etiquetas. Haz tu consulta como siempre y copia la respuesta completa, con las etiquetas.',
+      tip: 'Aunque el modelo escriba una etiqueta distinto ([PERSONA 1], PERSON_1, en negrita), la recuperación la reconoce.' },
+    { n: '6', icon: '🔄', title: 'Recupera los datos reales',
+      desc: 'En «Recuperar datos reales», pega la respuesta de la IA. En la misma sesión la llave se usa sola; en otro momento, sube el archivo de llave o pega la tabla del Word. Los datos restaurados aparecen resaltados para que compruebes que cayeron en su sitio.',
       tip: 'Los archivos descargados y el portapapeles no se borran al cerrar la app; cuida dónde quedan.' },
   ];
-
+  const whyItems = [
+    { icon: '🏢', title: 'Lo que pegas en una IA sale de tu empresa', body: 'ChatGPT, Gemini, Claude o Copilot procesan tu texto en servidores de terceros. Según el plan y la configuración, puede quedar almacenado o usarse para entrenar modelos. Un contrato, una nómina o una historia clínica no deberían viajar con nombres y cédulas reales.' },
+    { icon: '⚖️', title: 'La ley te obliga', body: 'Las leyes de protección de datos de Hispanoamérica (Ecuador, Colombia, México, Argentina, Chile, Perú, España…) exigen tratar los datos personales con una finalidad clara y medidas de seguridad. Compartirlos con un proveedor de IA sin control puede acarrear sanciones y pérdida de confianza de clientes y empleados.' },
+    { icon: '✅', title: 'La IA funciona igual sin los datos reales', body: 'Para resumir, redactar, traducir o analizar, el modelo no necesita saber quién es [PERSONA_1] ni cuál es su número de cuenta. Cambias los datos por etiquetas, obtienes la respuesta y los recuperas al final. Nadie fuera de tu equipo ve la información real.' },
+  ];
+  const glossary = [
+    ['Dato personal o sensible', 'Cualquier información que identifica a una persona o permite identificarla: nombre, cédula, teléfono, correo, dirección, cuenta bancaria, fecha de nacimiento, datos de salud.'],
+    ['Anonimizar', 'Quitar o sustituir los datos personales de un texto para que no se pueda saber de quién habla. Esta app lo hace de forma reversible: tú puedes volver atrás con la llave; la IA no.'],
+    ['Etiqueta', 'El marcador que reemplaza a cada dato, por ejemplo [PERSONA_1] o [TELEFONO_2]. El número distingue a cada persona o dato: todas las veces que aparece la misma persona llevan la misma etiqueta.'],
+    ['Llave', 'Archivo pequeño (.tsv) con la lista «etiqueta → dato real». Es confidencial: con ella cualquiera puede reconstruir el texto original. Sin ella, no hay forma de recuperar los datos.'],
+    ['Word con los originales', 'Documento .doc que la app puede descargar con el texto original, el texto anonimizado y la tabla de equivalencias. Sirve de respaldo; es tan confidencial como la llave.'],
+    ['Identificación', 'Número oficial que identifica a una persona o empresa: cédula y RUC (Ecuador), NIT y CC (Colombia), RFC y CURP (México), CUIT y DNI (Argentina), RUT (Chile), DUI (El Salvador), NIF/DNI (España), SSN (EE. UU.), entre otros.'],
+    ['Palabras que siempre se ocultan', 'Lista propia de términos que la app debe sustituir aunque no los detecte sola: nombres de clientes, proyectos, productos internos, cargos. Un término por línea.'],
+    ['Palabras que quedan visibles', 'Lista propia de términos que la app NO debe tocar porque no identifican a nadie o son públicos: el nombre de tu empresa, tu ciudad, un correo genérico de contacto.'],
+    ['Aviso de color (semáforo)', 'Rojo: aún se ven datos de los tipos marcados. Amarillo: la app no encontró más, pero tú debes revisar. Verde: ya marcaste que lo revisaste. No es una garantía: la app puede no detectar algo.'],
+    ['Detección por aproximación', 'Algunos tipos (montos, direcciones, empresas, fechas) se reconocen por su forma, sin certeza. Pueden marcar algo que no es sensible o dejar pasar algo que sí lo es. Por eso vienen desactivados y conviene revisar.'],
+    ['Falso positivo / falso negativo', 'Falso positivo: la app ocultó algo que no hacía falta ocultar. Falso negativo: la app dejó visible algo que sí debía ocultar. Ambos se corrigen con las listas de palabras propias.'],
+    ['Procesamiento local', 'Todo ocurre dentro de tu navegador, en tu computador. El texto no se envía a ningún servidor de FuturIA ni de nadie. Al cerrar la pestaña no queda nada guardado.'],
+  ];
+  const [showCats, setShowCats] = useState(false);
+  const [showGlossary, setShowGlossary] = useState(false);
+  const Collapsible = ({ open, onToggle, id, title, subtitle, children }) => (
+    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm">
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id}
+        className="flex w-full items-center justify-between gap-4 rounded-[28px] px-6 py-5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+        <span>
+          <span className="block text-lg font-bold text-[#222222]">{title}</span>
+          <span className="block mt-0.5 text-sm text-[#6b6b6b]">{subtitle}</span>
+        </span>
+        <span className="shrink-0 text-sm font-semibold text-[#333333]">{open ? 'Ocultar ▴' : 'Ver ▾'}</span>
+      </button>
+      {open ? <div id={id} className="border-t border-[#e5e5e5] px-6 pb-6 pt-5">{children}</div> : null}
+    </section>
+  );
   return (
     <div className="space-y-8">
-      <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6">
-        <h2 className="mb-2 text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
-        <p className="mb-4 text-sm text-[#6b6b6b]">Herramienta gratuita para equipos de empresa en Hispanoamérica. Oculta datos sensibles antes de enviar información a modelos de IA. Procesamiento 100% local — sin servidores, sin historial automático, sin registro, sin pago.</p>
-        {onStart ? <div className="mb-4"><AppButton onClick={onStart}>Empezar ahora →</AppButton></div> : null}
-        <details className="rounded-2xl border border-[#b00020]/20 bg-white p-4">
+      <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6" aria-labelledby="why-title">
+        <h2 id="why-title" className="mb-2 text-xl font-bold text-[#222222]">Por qué anonimizar antes de usar una IA</h2>
+        <p className="mb-5 text-sm text-[#333333]">Cada vez que pegas un documento en ChatGPT, Gemini o Claude, estás entregando a un tercero los nombres, cédulas, teléfonos y cuentas de tus clientes y empleados. Esta app los cambia por etiquetas antes de que salgan, y te los devuelve después.</p>
+        <div className="grid gap-4 md:grid-cols-3">
+          {whyItems.map(w => (
+            <div key={w.title} className="rounded-2xl border border-[#e5e5e5] bg-white p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-xl" aria-hidden="true">{w.icon}</span>
+                <h3 className="font-semibold text-[#222222]">{w.title}</h3>
+              </div>
+              <p className="text-sm leading-relaxed text-[#333333]">{w.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-[28px] border border-[#e5e5e5] bg-white p-6 shadow-sm" aria-labelledby="howto-title">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 id="howto-title" className="text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
+            <p className="mt-1 text-sm text-[#6b6b6b]">Seis pasos. Gratis, sin registro, y nada sale de tu navegador.</p>
+          </div>
+          {onStart ? <AppButton onClick={onStart}>Empezar ahora →</AppButton> : null}
+        </div>
+        <ol className="relative space-y-0">
+          {steps.map((s, i) => (
+            <li key={s.n} className="relative flex gap-4 pb-8 last:pb-0">
+              {i < steps.length - 1 ? <span aria-hidden="true" className="absolute left-4 top-9 bottom-0 w-px bg-[#e5e5e5]" /> : null}
+              <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#b00020] text-sm font-bold text-white">{s.n}</span>
+              <div className="min-w-0 flex-1 pt-0.5">
+                <h3 className="font-semibold text-[#222222]"><span aria-hidden="true" className="mr-1.5">{s.icon}</span>{s.title}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-[#333333]">{s.desc}</p>
+                <p className="mt-2 rounded-xl bg-[#fafafa] px-3 py-2 text-xs text-[#6b6b6b]"><span className="font-semibold text-[#2A5B8C]">Consejo:</span> {s.tip}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <details className="mt-6 rounded-2xl border border-[#b00020]/20 bg-[#fafafa] p-4">
           <summary className="cursor-pointer text-sm font-semibold text-[#222222]">¿Por qué es seguro? Tu texto no sale de tu navegador.</summary>
           <p className="mt-2 text-sm leading-relaxed text-[#333333]">
             No hay ningún servidor que reciba, guarde o analice tu contenido; todo ocurre en tu dispositivo y se borra al cerrar la pestaña.
@@ -1283,72 +1349,41 @@ function HowToTab({ onStart }) {
             Las librerías y fuentes sí se cargan desde internet al abrir la app. Las descargas y el portapapeles quedan fuera de este control.
           </p>
         </details>
-      </div>
+      </section>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {steps.map(s => (
-          <div key={s.n} className="rounded-[28px] border border-[#e5e5e5] bg-white p-5 shadow-sm">
-            <div className="mb-3 flex items-center gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#b00020] text-sm font-bold text-white">{s.n}</span>
-              <span className="text-lg">{s.icon}</span>
-              <span className="font-semibold text-[#222222]">{s.title}</span>
-            </div>
-            <p className="mb-3 text-sm leading-relaxed text-[#333333]">{s.desc}</p>
-            <div className="rounded-xl bg-[#fafafa] px-3 py-2 text-xs text-[#757575]">
-              <span className="font-semibold text-[#2A5B8C]">Tip:</span> {s.tip}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <h3 className="mb-4 text-lg font-bold text-[#222222]">Categorías de detección</h3>
+      <Collapsible open={showCats} onToggle={() => setShowCats(v => !v)} id="howto-cats" title="Qué tipos de datos detecta" subtitle={CATS.length + ' tipos. Los marcados con «Activo» vienen seleccionados al empezar.'}>
         <div className="grid gap-3 md:grid-cols-2">
-          {[...CATS, CUSTOM_CAT].map(c => (
-            <div key={c.tag} className="rounded-2xl border p-4 flex items-start gap-3" style={{ borderColor: c.border, backgroundColor: c.bg }}>
-              <mark className="anon text-xs font-mono font-bold px-2 py-1 rounded shrink-0 whitespace-nowrap"
-                style={{ backgroundColor: c.bg, color: c.color, border: '1px solid ' + c.border }}>
-                [{c.tag}_N]
-              </mark>
-              <div>
-                <div className="font-semibold text-sm text-[#222222]">
-                  {c.label}
-                  {c.alwaysOn && <span className="ml-2 text-xs font-normal rounded-full bg-[#fef2f2] text-[#dc2626] border border-[#fecaca] px-2 py-0.5">Siempre activa</span>}
-                  {c.id === 'custom' && <span className="ml-2 text-xs font-normal rounded-full bg-[#f9fafb] text-[#374151] border border-[#d1d5db] px-2 py-0.5">Campo libre</span>}
-                  {!c.on && !c.alwaysOn && c.id !== 'custom' && <span className="ml-1 text-xs text-[#757575]">(desactivada por defecto)</span>}
+          {[...CATS.filter(c => c.on), ...CATS.filter(c => !c.on), CUSTOM_CAT].map(c => (
+            <div key={c.tag} className="flex items-start gap-3 rounded-2xl border border-[#e5e5e5] p-3">
+              <span aria-hidden="true" className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-sm text-[#222222]">{c.id === 'custom' ? 'Palabras propias' : c.label}</span>
+                  {c.alwaysOn ? <span className="rounded-full border border-[#d4d4d4] bg-[#fafafa] px-2 py-0.5 text-xs text-[#333333]">Siempre</span>
+                    : c.id === 'custom' ? <span className="rounded-full border border-[#d4d4d4] bg-[#fafafa] px-2 py-0.5 text-xs text-[#333333]">Tú decides</span>
+                    : c.on ? <span className="rounded-full border border-[#d4d4d4] bg-[#fafafa] px-2 py-0.5 text-xs text-[#333333]">Activo</span>
+                    : <span className="text-xs text-[#6b6b6b]">Apagado al empezar</span>}
                 </div>
-                <div className="text-xs text-[#757575] mt-0.5">
-                  {c.id === 'custom'
-                    ? 'Nombres propios, siglas internas, códigos de proyecto, cargos — un término por línea, mínimo 2 caracteres.'
-                    : <span>Ej: <em>{c.ex}</em></span>
-                  }
+                <div className="mt-0.5 text-xs text-[#6b6b6b]">
+                  {c.id === 'custom' ? 'Nombres de clientes, proyectos, códigos internos, cargos — los escribes tú, uno por línea.' : <span>Ej.: <em>{c.ex}</em></span>}
+                  {' '}→ <span className="font-mono text-[#333333]">[{c.tag}_1]</span>
                 </div>
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </Collapsible>
 
-      <div className="rounded-[28px] border border-[#e5e5e5] bg-white p-6">
-        <h3 className="mb-3 font-bold text-[#222222]">Glosario</h3>
-        <dl className="grid gap-3 text-sm md:grid-cols-2">
-          {[
-            ['Anonimización', 'Sustitución de datos personales por identificadores que no permiten reconocer al individuo.'],
-            ['Seudonimización', 'Anonimización reversible con una tabla de equivalencias. Es lo que hace esta app: las etiquetas [TAG_N] pueden revertirse usando la pestaña Recuperar.'],
-            ['PII', 'Personally Identifiable Information — datos que permiten identificar a una persona (email, teléfono, ID fiscal, nombre propio).'],
-            ['IDs fiscales LATAM+USA', 'RFC (México), CURP (México), CUIT/CUIL (Argentina), RUT (Chile), NIT (Colombia), RIF (Venezuela), RUC (Ecuador/Perú/Paraguay), CPF/CNPJ (Brasil), RTN (Honduras), RNC (R. Dominicana), SSN/EIN (EE.UU.) y otros identificadores tributarios nacionales.'],
-            ['Modo heurístico', 'Categoría que usa reglas aproximadas para detectar datos sensibles. Puede generar falsos positivos (detectar algo que no es sensible) o falsos negativos (no detectar algo que sí lo es). Las categorías Empresa, Dirección y Fecha operan en modo heurístico — revisa el resultado antes de enviar.'],
-            ['Revisión residual', 'Búsqueda de coincidencias que siguen presentes después de sustituir datos. No es una medición de probabilidad ni una certificación de seguridad. Ausencia de coincidencias no significa ausencia de datos sensibles.'],
-            ['Falso positivo', 'Dato detectado como sensible que en realidad no lo es. Más frecuente en categorías heurísticas (empresa, dirección, fecha).'],
-            ['Falso negativo', 'Dato sensible que la app no detectó. Revisa siempre el resultado, especialmente en documentos con formatos o idiomas inusuales.'],
-          ].map(([t, d]) => (
+      <Collapsible open={showGlossary} onToggle={() => setShowGlossary(v => !v)} id="howto-glossary" title="Glosario" subtitle="Las palabras que verás en la app, explicadas sin tecnicismos.">
+        <dl className="grid gap-4 text-sm md:grid-cols-2">
+          {glossary.map(([t, d]) => (
             <div key={t}>
-              <dt className="font-semibold text-[#b00020]">{t}</dt>
-              <dd className="text-[#333333]">{d}</dd>
+              <dt className="font-semibold text-[#222222]">{t}</dt>
+              <dd className="mt-0.5 text-[#333333]">{d}</dd>
             </div>
           ))}
         </dl>
-      </div>
+      </Collapsible>
     </div>
   );
 }
@@ -3010,7 +3045,7 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
               <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h3 id="key-title" className="font-bold text-[#222222]">🔑 Llave para recuperar los datos originales</h3>
-                  <p className="mt-1 text-sm text-[#444444]">{keySaved ? 'Llave guardada. Úsala en «Recuperar» para volver a poner los nombres reales.' : 'Guárdala ahora. Si cierras esta pestaña sin guardarla, no podrás volver a poner los nombres reales.'}</p>
+                  <p className="mt-1 text-sm text-[#444444]">{keySaved ? 'Llave guardada. Úsala en «Recuperar datos reales» para volver a poner los nombres reales.' : 'Guárdala ahora. Si cierras esta pestaña sin guardarla, no podrás volver a poner los nombres reales.'}</p>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   <AppButton onClick={downloadKey}>{keySaved ? '✓ Llave guardada' : 'Guardar llave en mi equipo'}</AppButton>
@@ -3113,7 +3148,7 @@ function RecoverTab({ lastResult }) {
     <div className="space-y-6">
       <LiveStatus message={status} />
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <h2 className="text-xl font-bold text-[#222222] mb-1">Recuperar: vuelve a poner los datos reales en la respuesta de la IA</h2>
+        <h2 className="text-xl font-bold text-[#222222] mb-1">Vuelve a poner los datos reales en la respuesta de la IA</h2>
         <p className="text-sm text-[#6b6b6b]">Pega lo que te contestó la IA. Cada etiqueta como <span className="font-mono">[PERSONA_1]</span> se cambia por el dato real, aunque el modelo la haya escrito distinto.</p>
       </div>
 
@@ -3198,8 +3233,8 @@ function RecoverTab({ lastResult }) {
 // ─── App principal ────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'how', label: 'Cómo usar' },
-  { id: 'work', label: '🔒 Ocultar datos' },
-  { id: 'recover', label: '🔄 Recuperar' },
+  { id: 'work', label: '🔒 Anonimizar texto' },
+  { id: 'recover', label: '🔄 Recuperar datos reales' },
   { id: 'privacy', label: 'Privacidad' },
 ];
 
