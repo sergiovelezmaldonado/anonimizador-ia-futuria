@@ -136,13 +136,13 @@ const NUMBER = '\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})
 
 const CATS = [
   {
-    id: 'person', label: 'Nombres de personas (por contexto)',
+    id: 'person', label: 'Nombres de personas (por contexto)', short: 'Personas',
     ex: 'Cliente: María García · REPRESENTANTE: JUAN PÉREZ · Dear Mr. Smith',
     color: '#be185d', bg: '#fdf2f8', border: '#fbcfe8', tag: 'PERSONA', icon: '👤',
     on: true, pats: []
   },
   {
-    id: 'credentials',
+    id: 'credentials', short: 'Claves y contraseñas',
     label: 'Credenciales y API keys',
     ex: 'api_key=abc123, «redacted:sk_live_…», password: secreta',
     color: '#dc2626', bg: '#fef2f2', border: '#fecaca', tag: 'CREDENCIAL', icon: '🔑',
@@ -154,7 +154,7 @@ const CATS = [
     ]
   },
   {
-    id: 'url',
+    id: 'url', short: 'Direcciones web',
     label: 'URLs y dominios',
     ex: 'https://empresa.com/docs/contrato',
     color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', tag: 'URL', icon: '🔗',
@@ -165,7 +165,7 @@ const CATS = [
     ]
   },
   {
-    id: 'email',
+    id: 'email', short: 'Correos',
     label: 'Correos electrónicos',
     ex: 'maria.garcia@empresa.com',
     color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', tag: 'EMAIL', icon: '✉️',
@@ -173,7 +173,7 @@ const CATS = [
     pats: [/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/gi]
   },
   {
-    id: 'financial',
+    id: 'financial', short: 'Cuentas y tarjetas',
     label: 'Cuentas financieras (IBAN, tarjetas, CLABE, CBU)',
     ex: 'ES91 2100 0418 4502 0005 1332 · CLABE 002010077777777771',
     color: '#065f46', bg: '#ecfdf5', border: '#a7f3d0', tag: 'CUENTA', icon: '🏦',
@@ -189,7 +189,7 @@ const CATS = [
     ]
   },
   {
-    id: 'ip',
+    id: 'ip', short: 'IP',
     label: 'Direcciones IP y MAC',
     ex: '192.168.1.105 · fe80::1 · 00:1A:2B:3C:4D:5E',
     color: '#92400e', bg: '#fffbeb', border: '#fde68a', tag: 'IP', icon: '🖧',
@@ -201,7 +201,7 @@ const CATS = [
     ]
   },
   {
-    id: 'fiscal',
+    id: 'fiscal', short: 'Identificaciones',
     label: 'Identificación personal y fiscal (Hispanoamérica + USA)',
     ex: 'Cédula, DNI, CURP, RFC, RUT, CUIT, NIT, RUC, DUI, DPI, RNC, SSN, pasaporte…',
     color: '#9f1239', bg: '#fff1f2', border: '#fecdd3', tag: 'ID_FISCAL', icon: '🪪',
@@ -262,7 +262,7 @@ const CATS = [
     ]
   },
   {
-    id: 'phone',
+    id: 'phone', short: 'Teléfonos',
     label: 'Teléfonos',
     ex: '+52 55 1234 5678 · 0991234567 · 310 456 7890',
     color: '#4338ca', bg: '#eef2ff', border: '#c7d2fe', tag: 'TELEFONO', icon: '📞',
@@ -279,7 +279,7 @@ const CATS = [
     ]
   },
   {
-    id: 'money',
+    id: 'money', short: 'Montos',
     label: 'Montos exactos (todas las monedas)',
     ex: '$85.340 · USD 45,000.00 · S/ 3,500 · COP 4.200.000',
     color: '#b45309', bg: '#fffbeb', border: '#fcd34d', tag: 'MONTO', icon: '💰',
@@ -290,7 +290,7 @@ const CATS = [
     ]
   },
   {
-    id: 'birthdate',
+    id: 'birthdate', short: 'Fecha de nacimiento y edad',
     label: 'Fecha de nacimiento y edad',
     ex: 'Nacimiento: 7 de septiembre de 1985 · Edad: 38 años',
     color: '#9d174d', bg: '#fdf2f8', border: '#f9a8d4', tag: 'NACIMIENTO', icon: '🎂',
@@ -302,7 +302,7 @@ const CATS = [
     ]
   },
   {
-    id: 'address',
+    id: 'address', short: 'Direcciones',
     label: 'Direcciones físicas (heurístico)',
     ex: 'Av. República #123, Calle Bolívar 45',
     color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', tag: 'DIRECCION', icon: '📍',
@@ -312,7 +312,7 @@ const CATS = [
     ]
   },
   {
-    id: 'company',
+    id: 'company', short: 'Empresas',
     label: 'Nombres de empresa (heurístico)',
     ex: 'Acme S.A., XYZ Corp., Andina S.A.S.',
     color: '#0f766e', bg: '#f0fdfa', border: '#99f6e4', tag: 'EMPRESA', icon: '🏢',
@@ -322,7 +322,7 @@ const CATS = [
     ]
   },
   {
-    id: 'date',
+    id: 'date', short: 'Fechas',
     label: 'Fechas específicas (heurístico)',
     ex: '15/03/2024 · 15 de marzo de 2024 · 2024-03-15',
     color: '#6d28d9', bg: '#f5f3ff', border: '#c4b5fd', tag: 'FECHA', icon: '📅',
@@ -470,9 +470,9 @@ function computeResidualRisk(text, activeIds = null, options = {}) {
 }
 
 function getRiskInfo(score, reviewed = false) {
-  if (score > 0) return { label: 'Datos detectables pendientes', emoji: '🔴', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
-  if (reviewed) return { label: 'Revisión manual confirmada', emoji: '🟡', color: '#92400e', bg: '#fffbeb', border: '#fcd34d' };
-  return { label: 'Revisar antes de usar', emoji: '🟡', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' };
+  if (score > 0) return { label: 'Quedan datos por ocultar', emoji: '🔴', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' };
+  if (reviewed) return { label: 'Revisado. Listo para copiar', emoji: '🟢', color: '#166534', bg: '#f0fdf4', border: '#86efac' };
+  return { label: 'Revisa antes de copiar', emoji: '🟡', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' };
 }
 
 // ─── Recuperación tolerante: repara etiquetas deformadas por el LLM ───────────
@@ -695,20 +695,19 @@ function RiskSemaphore({ text, reviewed, onReview, activeIds, whitelist, riskDat
         <div className="font-bold text-sm" style={{ color: info.color }} role={score > 0 ? 'alert' : undefined}>{info.label}</div>
         {hits.length > 0 ? (
           <div className="text-xs mt-0.5" style={{ color: info.color }}>
-            Datos de categorías activas aún presentes: {hits.join(', ')}. Añádelos a Términos personalizados, retíralos del texto o márcalos en la lista blanca si no identifican a nadie.
+            Todavía se ven: {hits.join(', ').toLowerCase()}. Añádelos a «Oculta siempre estas palabras» o, si no identifican a nadie, a «Deja visibles estas palabras».
           </div>
         ) : (
-          <div className="text-xs mt-0.5 text-[#92400e]">Sin coincidencias en las categorías activas. Esto no demuestra que el texto esté seudonimizado por completo.</div>
+          <div className="text-xs mt-0.5" style={{ color: info.color }}>La app no lo detecta todo: mira si queda algún nombre, cargo o lugar que identifique a alguien.</div>
         )}
         {warnings.length > 0 ? (
-          <div className="text-xs mt-1 text-[#92400e]">Aviso: hay posibles {warnings.join(', ').toLowerCase()} en categorías desactivadas. Actívalas si pueden identificar a alguien.</div>
+          <div className="text-xs mt-1 text-[#92400e]">Quedan posibles {warnings.map(w => w.replace(/\s*\(.*?\)/g, '')).join(', ').toLowerCase()} sin ocultar. Activa esos tipos arriba si identifican a alguien.</div>
         ) : null}
       </div>
-      <p className="w-full text-xs text-[#92400e]">Lista rápida: ¿queda algún nombre o apodo? ¿una cifra, cargo o lugar que identifique a alguien? ¿un dato de salud, familia o sindicato? Añádelos a Términos personalizados y vuelve a procesar. No calculamos una probabilidad de riesgo.</p>
       <label className="flex w-full items-start gap-2 text-sm text-[#333333]">
         <input type="checkbox" data-review checked={!!reviewed} disabled={hits.length > 0} aria-describedby="review-help"
           onChange={e => onReview && onReview(e.target.checked)} className="mt-1 h-5 w-5 shrink-0" />
-        <span id="review-help">He revisado el resultado y retirado los datos que no debo compartir. Esta confirmación no certifica una seudonimización completa.{hits.length > 0 ? ' Se habilita cuando no queden datos pendientes de categorías activas.' : ''}</span>
+        <span><strong>Revisé el texto y no queda nada que no deba compartir.</strong> <span id="review-help" className="text-xs text-[#6b6b6b]">{hits.length > 0 ? 'Se activa cuando no queden datos por ocultar.' : 'Al marcarla se activan Copiar y Descargar.'}</span></span>
       </label>
     </div>
   );
@@ -1275,15 +1274,14 @@ function HowToTab({ onStart }) {
         <h2 className="mb-2 text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
         <p className="mb-4 text-sm text-[#6b6b6b]">Herramienta gratuita para equipos de empresa en Hispanoamérica. Oculta datos sensibles antes de enviar información a modelos de IA. Procesamiento 100% local — sin servidores, sin historial automático, sin registro, sin pago.</p>
         {onStart ? <div className="mb-4"><AppButton onClick={onStart}>Empezar ahora →</AppButton></div> : null}
-        <div className="rounded-2xl border border-[#b00020]/20 bg-white p-4">
-          <p className="text-sm font-semibold text-[#222222] mb-1">¿Por qué es seguro usar esta app?</p>
-          <p className="text-sm leading-relaxed text-[#333333]">
-            A diferencia de subir un documento a un servicio en la nube, esta app procesa tu texto <strong>únicamente dentro de tu navegador</strong>.
-            El código se ejecuta en tu dispositivo — no existe ningún servidor que reciba, almacene o analice tu contenido.
-            Puedes verificarlo: abre DevTools (F12 → pestaña Red) y comprueba que no hay ninguna petición de red mientras anonimizas.
-            La app no crea historial ni guarda documentos en localStorage, cookies o bases de datos. El contenido queda en memoria durante la sesión. Las librerías y fuentes se cargan desde internet; los PDF y DOCX activan cargas adicionales de recursos. Las descargas y el portapapeles pueden conservar tus datos fuera de la app.
+        <details className="rounded-2xl border border-[#b00020]/20 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-[#222222]">¿Por qué es seguro? Tu texto no sale de tu navegador.</summary>
+          <p className="mt-2 text-sm leading-relaxed text-[#333333]">
+            No hay ningún servidor que reciba, guarde o analice tu contenido; todo ocurre en tu dispositivo y se borra al cerrar la pestaña.
+            Lo puedes comprobar: con F12 → pestaña Red verás que no sale ninguna petición mientras ocultas datos.
+            Las librerías y fuentes sí se cargan desde internet al abrir la app. Las descargas y el portapapeles quedan fuera de este control.
           </p>
-        </div>
+        </details>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -2664,9 +2662,9 @@ function TemplatesPanel({ onSelect, onClose }) {
 
 // ─── Panel compartido de categorías, términos y lista blanca ─────────────────
 const PRESETS = [
-  { id: 'default', label: 'Predeterminado', desc: 'Identidad, contactos, cuentas y credenciales', cats: ['person', 'credentials', 'url', 'email', 'financial', 'ip', 'fiscal', 'phone', 'birthdate'] },
-  { id: 'identity', label: 'Identidad sí, cifras no', desc: 'Oculta quién; conserva montos, fechas y cantidades para análisis financiero', cats: ['person', 'credentials', 'email', 'financial', 'ip', 'fiscal', 'phone', 'birthdate', 'url', 'company', 'address'] },
-  { id: 'max', label: 'Máxima cobertura', desc: 'Todas las categorías, incluidas las heurísticas (más falsos positivos)', cats: CATS.map(c => c.id) },
+  { id: 'default', label: 'Recomendado', desc: 'Identidad, contactos, cuentas y credenciales', cats: ['person', 'credentials', 'url', 'email', 'financial', 'ip', 'fiscal', 'phone', 'birthdate'] },
+  { id: 'identity', label: 'Solo identidad', desc: 'Oculta quién; conserva montos, fechas y cantidades para análisis financiero', cats: ['person', 'credentials', 'email', 'financial', 'ip', 'fiscal', 'phone', 'birthdate', 'url', 'company', 'address'] },
+  { id: 'max', label: 'Todo', desc: 'Todas las categorías, incluidas las heurísticas (más falsos positivos)', cats: CATS.map(c => c.id) },
 ];
 
 function GrowingTextarea({ value, onChange, minRows = 3, maxRows = 14, className, visible = true, ...rest }) {
@@ -2683,59 +2681,54 @@ function GrowingTextarea({ value, onChange, minRows = 3, maxRows = 14, className
   return <textarea ref={ref} rows={minRows} value={value} onChange={onChange} className={className} {...rest} />;
 }
 
-function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, whitelist, onWhitelist, collapsed, onCollapsedChange }) {
-  const activeCount = cats.filter(c => c.on).length;
+function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, whitelist, onWhitelist }) {
   const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
+  const ordered = [...cats.filter(c => c.on), ...cats.filter(c => !c.on)];
   return (
-    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm" aria-labelledby="cats-title">
-      <button type="button" aria-expanded={!collapsed} aria-controls="cats-body" onClick={() => onCollapsedChange(!collapsed)}
-        className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-[28px] px-6 py-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
-        <span className="flex items-center gap-2">
-          <span id="cats-title" className="font-bold text-[#222222]">Qué ocultar</span>
-          <span className="rounded-full bg-[#fff5f6] px-2.5 py-0.5 text-xs font-semibold text-[#b00020]">{activeCount} categorías activas</span>
-        </span>
-        <span className="text-sm text-[#6b6b6b]" aria-hidden="true">{collapsed ? '▸ Ajustar' : '▾ Ocultar ajustes'}</span>
-      </button>
-      <div id="cats-body" hidden={collapsed} className="space-y-5 px-6 pb-6">
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Ajustes rápidos">
-          {PRESETS.map(p => (
-            <button key={p.id} type="button" onClick={() => onPreset(p)} title={p.desc}
-              className="min-h-[44px] rounded-2xl border border-[#9a9a9a] bg-white px-3 py-2 text-sm font-semibold text-[#333333] hover:bg-[#fff5f6] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
-              {p.label}
+    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6 space-y-6" aria-labelledby="cats-title">
+      <div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="cats-title" className="font-bold text-[#222222]"><span className="text-[#b00020]">2 ·</span> Qué tipos de datos se ocultan</h2>
+            <p className="mt-1 text-sm text-[#6b6b6b]">Los habituales ya están marcados. Toca uno para activarlo o quitarlo.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Atajos">
+            {PRESETS.map(p => (
+              <button key={p.id} type="button" onClick={() => onPreset(p)} title={p.desc}
+                className="rounded-full border border-[#d4d4d4] bg-white px-3 py-1.5 text-xs font-semibold text-[#333333] hover:border-[#b00020] hover:text-[#b00020] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div id="cats-body" className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Tipos de datos">
+          {ordered.map(c => (
+            <button key={c.id} type="button" onClick={() => onToggle(c.id)} aria-pressed={c.on} disabled={c.alwaysOn} aria-label={c.label}
+              title={c.alwaysOn ? 'Siempre activo. Las claves nunca deben salir.' : c.label + ' — ej.: ' + c.ex}
+              className={cn('inline-flex min-h-[36px] items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
+                c.on ? 'border-transparent text-[#222222]' : 'border-dashed border-[#bdbdbd] bg-white text-[#8a8a8a] hover:border-[#6b6b6b] hover:text-[#333333]',
+                c.alwaysOn && 'cursor-default')}
+              style={c.on ? { backgroundColor: c.bg, boxShadow: 'inset 0 0 0 1px ' + c.border } : undefined}>
+              <span aria-hidden="true" className="text-xs font-bold" style={{ color: c.on ? c.color : '#bdbdbd' }}>{c.on ? '✓' : '+'}</span>
+              <span>{c.short || c.label}</span>
+              {c.alwaysOn ? <span aria-hidden="true" className="text-xs">🔒</span> : null}
             </button>
           ))}
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" role="group" aria-label="Categorías de detección">
-          {cats.map(c => (
-            <button key={c.id} type="button" onClick={() => onToggle(c.id)} aria-pressed={c.on} disabled={c.alwaysOn} title={c.label + ' — ej.: ' + c.ex}
-              className={cn('flex min-h-[44px] items-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
-                c.alwaysOn ? 'border-[#dc2626] bg-[#fef2f2] text-[#dc2626] cursor-default'
-                  : c.on ? 'border-[#b00020] bg-[#fff5f6] text-[#b00020]'
-                  : 'border-[#9a9a9a] bg-white text-[#6b6b6b] hover:bg-[#fafafa]')}>
-              <span aria-hidden="true" className="shrink-0">{c.alwaysOn ? '🔒' : c.on ? '☑' : '☐'}</span>
-              <span className="min-w-0 leading-tight">{c.label}</span>
-            </button>
-          ))}
+      </div>
+      <div className="grid gap-5 md:grid-cols-2">
+        <div>
+          <label htmlFor="custom-terms" className="block font-bold text-[#222222]"><span className="text-[#b00020]">3 ·</span> Oculta siempre estas palabras</label>
+          <p id="custom-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Nombres, proyectos o códigos que la app no detecta sola. Uno por línea.</p>
+          <GrowingTextarea id="custom-terms" className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
+            placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ"} aria-describedby="custom-help" />
         </div>
-        <div className="grid gap-5 md:grid-cols-2">
-          <div>
-            <div className="mb-2 flex items-center gap-2">
-              <label htmlFor="custom-terms" className="text-sm font-semibold text-[#222222]">Términos a ocultar siempre</label>
-              <InfoIcon text="Nombres propios, siglas internas, códigos de proyecto, nombres de clientes o proveedores: cualquier término que quieras sustituir y que no cubra una categoría. Un término por línea, sin distinción de mayúsculas. Se reemplazan por [PERSONALIZADO_N]." />
-            </div>
-            <GrowingTextarea id="custom-terms" visible={!collapsed} className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
-              placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ"} aria-describedby="custom-help" />
-            <p id="custom-help" className="mt-1.5 text-xs text-[#6b6b6b]">Un término por línea · mínimo 2 caracteres · crece al escribir</p>
-          </div>
-          <div>
-            <div className="mb-2 flex items-center gap-2">
-              <label htmlFor="whitelist" className="text-sm font-semibold text-[#222222]">Lista blanca: no ocultar nunca</label>
-              <InfoIcon text="Tu propia empresa, tus productos, ciudades, cargos genéricos o correos públicos que no identifican a nadie. Lo que esté aquí no se sustituye ni cuenta como pendiente en la revisión." />
-            </div>
-            <GrowingTextarea id="whitelist" visible={!collapsed} className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
-              placeholder={"Mi Empresa S.A.\nventas@miempresa.com\nBogotá"} aria-describedby="whitelist-help" />
-            <p id="whitelist-help" className="mt-1.5 text-xs text-[#6b6b6b]">Un término por línea · también puedes añadir desde cada etiqueta del resultado</p>
-          </div>
+        <div>
+          <label htmlFor="whitelist" className="block font-bold text-[#222222]"><span className="text-[#b00020]">4 ·</span> Deja visibles estas palabras</label>
+          <p id="whitelist-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Lo que la IA sí puede ver: tu empresa, tu ciudad, un correo público. Uno por línea.</p>
+          <GrowingTextarea id="whitelist" className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
+            placeholder={"Mi Empresa S.A.\nventas@miempresa.com\nBogotá"} aria-describedby="whitelist-help" />
+          <p className="mt-1.5 text-xs text-[#6b6b6b]">También puedes tocar una etiqueta del resultado y elegir «dejar visible».</p>
         </div>
       </div>
     </section>
@@ -2753,7 +2746,6 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
   const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
   const [customTerms, setCustomTerms] = useState('');
   const [whitelist, setWhitelist] = useState('');
-  const [settingsCollapsed, setSettingsCollapsed] = useState(true);
   const [showOriginal, setShowOriginal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedTable, setCopiedTable] = useState(false);
@@ -2898,96 +2890,89 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
       <LiveStatus message={status} />
       {showTemplates ? <TemplatesPanel onSelect={loadTemplate} onClose={() => setShowTemplates(false)} /> : null}
 
-      {/* Entrada: primero lo que el usuario quiere hacer */}
+      {/* Bloque 1 — arranque: qué es esto y cómo probarlo sin arriesgar nada */}
+      <section className="rounded-[28px] border border-[#f3c6cc] bg-[#fff5f6] px-6 py-5" aria-labelledby="start-title">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 max-w-2xl">
+            <h2 id="start-title" className="text-lg font-bold text-[#222222]">Pásalo por aquí antes de pegarlo en una IA</h2>
+            <p className="mt-1 text-sm text-[#444444]">Cambiamos nombres, teléfonos, cuentas y claves por etiquetas. Luego los recuperas. Nada sale de tu navegador.</p>
+            <p className="mt-1 text-xs text-[#6b6b6b]">50 ejemplos con datos ficticios para probar sin arriesgar nada.</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <AppButton variant={inputText ? 'secondary' : 'primary'} onClick={trySample}>Ver un ejemplo ahora</AppButton>
+            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>Elegir una plantilla por área ▾</AppButton>
+          </div>
+        </div>
+      </section>
+
+      {/* Bloque 2 — tu texto */}
       <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6" aria-labelledby="input-title"
         onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={handleDrop}>
         <div className="mb-3 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <h2 id="input-title" className="font-bold text-[#222222]">Pega el texto o carga un documento</h2>
-            <InfoIcon text="Correos, contratos, informes, tablas, chats: pega el texto o carga un PDF, DOCX, TXT o CSV de hasta 25 MB y 300 páginas. Todo se procesa en tu navegador." />
-          </div>
-          <div className="flex gap-2 flex-wrap">
+          <h2 id="input-title" className="font-bold text-[#222222]"><span className="text-[#b00020]">1 ·</span> Pega tu texto o sube un archivo</h2>
+          <div className="flex items-center gap-2 flex-wrap">
             <AppButton variant="secondary" disabled={uploading} onClick={() => fileInputRef.current && fileInputRef.current.click()} aria-describedby="file-limits">
-              {uploading ? '⏳ Procesando…' : '↑ Cargar PDF / DOCX / TXT / CSV'}
+              {uploading ? '⏳ Procesando…' : '↑ Subir archivo'}
             </AppButton>
+            <span id="file-limits" className="text-xs text-[#6b6b6b]">PDF, Word, TXT o CSV · hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas</span>
             <input ref={fileInputRef} type="file" accept={fileAccept} className="hidden" aria-label="Seleccionar archivo"
               onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
-            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>📋 Plantillas de ejemplo</AppButton>
             {inputText ? <AppButton variant="secondary" onClick={clear} disabled={uploading}>Limpiar</AppButton> : null}
           </div>
         </div>
         <textarea id="input-text"
           className={cn("w-full rounded-2xl border bg-white p-4 font-mono text-base sm:text-sm text-[#222222] outline-none transition resize-y focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020]",
             dragOver ? 'border-[#b00020] bg-[#fff5f6]' : 'border-[#9a9a9a]')}
-          rows={14} value={inputText}
+          rows={12} value={inputText}
           onChange={e => { setInputText(e.target.value); setSourceName(null); invalidate(); }}
-          placeholder="Pega aquí el texto que vas a enviar a ChatGPT, Claude o Gemini… o arrastra un archivo sobre este recuadro."
+          placeholder="Pega aquí lo que vas a enviar a ChatGPT, Claude o Gemini, o arrastra un archivo."
           aria-label="Texto a procesar" />
-        {sourceName ? <p className="mt-2 text-xs text-[#6b6b6b]">Archivo: {sourceName} · puedes editar el texto extraído antes de procesar.</p> : null}
+        {sourceName ? <p className="mt-2 text-xs text-[#6b6b6b]">Archivo: {sourceName} · puedes editar el texto extraído antes de continuar.</p> : null}
         {uploading && uploadMsg ? (
           <div className="mt-3 flex items-center gap-3 rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1d4ed8]" role="status">
             <span className="animate-spin text-lg" aria-hidden="true">⏳</span><span>{uploadMsg}</span>
           </div>
         ) : null}
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-          <span id="file-limits" className="text-xs text-[#6b6b6b]">{inputText.length.toLocaleString()} caracteres · {activeCats.length} categorías activas · hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas</span>
-          <div className="flex gap-2 flex-wrap">
-            {!inputText ? <AppButton variant="secondary" onClick={trySample}>Probar con un ejemplo</AppButton> : null}
-            <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>🔒 Ocultar datos sensibles</AppButton>
-          </div>
+          <span className="text-xs text-[#6b6b6b]">
+            {inputText.trim() ? inputText.length.toLocaleString() + ' caracteres' : <span>Pega un texto o <button type="button" onClick={trySample} className="font-semibold text-[#b00020] underline">ve un ejemplo</button> para activar el botón.</span>}
+          </span>
+          <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>Ocultar datos sensibles</AppButton>
         </div>
       </section>
 
+      {/* Bloques 3 y 4 — qué se oculta y palabras propias, siempre visibles */}
       <CategoryPanel cats={cats} onToggle={toggleCat} onPreset={applyPreset} customTerms={customTerms} onCustomTerms={v => { setCustomTerms(v); invalidate(); }}
-        whitelist={whitelist} onWhitelist={v => { setWhitelist(v); invalidate(); }} collapsed={settingsCollapsed} onCollapsedChange={setSettingsCollapsed} />
+        whitelist={whitelist} onWhitelist={v => { setWhitelist(v); invalidate(); }} />
 
       {result ? (
         <div ref={outputRef} className="space-y-4" style={{ scrollMarginTop: '130px' }}>
           <h2 className="sr-only">Resultado</h2>
           <RiskSemaphore text={result.out} reviewed={reviewed} onReview={setReviewed} riskData={riskData} />
 
-          {!canExport ? (
-            <div className="rounded-2xl border border-[#dc2626] bg-[#fef2f2] p-4 text-sm text-[#b91c1c] font-semibold">
-              Copiar, descargar e imprimir se habilitan al confirmar la revisión manual{riskData.hits.length ? ' y retirar los datos pendientes' : ''}.
-            </div>
-          ) : null}
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[{ val: totalDetected, label: 'datos distintos sustituidos', highlight: true }, { val: byCategory.length, label: 'categorías con coincidencias' }, { val: result.reps.reduce((s, r) => s + (r.count || 1), 0), label: 'apariciones cubiertas' }].map((item, i) => (
-              <div key={i} className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-4 text-center">
-                <div className={cn("text-3xl font-bold", item.highlight ? "text-[#b00020]" : "text-[#222222]")}>{item.val}</div>
-                <div className="text-xs text-[#6b6b6b] mt-1">{item.label}</div>
-              </div>
-            ))}
-          </div>
-
-          {byCategory.length > 0 ? (
-            <ul className="flex flex-wrap gap-2" aria-label="Leyenda por categoría">
-              {byCategory.map(c => (
-                <li key={c.id} className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold" style={{ backgroundColor: c.bg, color: c.color, borderColor: c.color }}>
-                  <span aria-hidden="true">{c.icon}</span>{c.label}: {c.count}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
           <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6" aria-labelledby="output-title">
             <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-3">
-                <h3 id="output-title" className="font-bold text-[#222222]">Texto seudonimizado</h3>
-                <button type="button" onClick={() => setShowOriginal(v => !v)} aria-expanded={showOriginal}
-                  className={cn("min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]",
-                    showOriginal ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#9a9a9a] bg-white text-[#6b6b6b] hover:bg-[#fafafa]")}>
-                  {showOriginal ? '▼ Ocultar original' : '▶ Ver comparativa'}
-                </button>
+              <div className="flex items-center gap-3 flex-wrap">
+                <h3 id="output-title" className="font-bold text-[#222222]">Texto listo para la IA</h3>
+                <span className="text-sm text-[#6b6b6b]"><strong className="text-[#222222]">{totalDetected}</strong> datos ocultados · <strong className="text-[#222222]">{byCategory.length}</strong> tipos</span>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <AppButton onClick={() => copyOutput(true)} disabled={!canExport}>{copied ? '✓ Copiado' : '📋 Copiar para la IA'}</AppButton>
+                <AppButton onClick={() => copyOutput(true)} disabled={!canExport} title={canExport ? '' : 'Marca la casilla de revisión para activar'}>{copied ? '✓ Copiado' : 'Copiar para pegar en la IA'}</AppButton>
                 <AppButton variant="secondary" onClick={() => copyOutput(false)} disabled={!canExport}>Copiar solo el texto</AppButton>
-                <AppButton variant="secondary" onClick={openViewer}>🔎 Ver como documento</AppButton>
-                <AppButton variant="secondary" onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>↓ Descargar .txt</AppButton>
+                <AppButton variant="secondary" onClick={() => setShowOriginal(v => !v)} aria-expanded={showOriginal}>{showOriginal ? 'Ocultar el original' : 'Ver original y resultado'}</AppButton>
+                <AppButton variant="secondary" onClick={openViewer}>Ver como documento</AppButton>
+                <AppButton variant="secondary" onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>Descargar .txt</AppButton>
               </div>
             </div>
+            {byCategory.length > 0 ? (
+              <ul className="mb-3 flex flex-wrap gap-2" aria-label="Datos ocultados por tipo">
+                {byCategory.map(c => (
+                  <li key={c.id} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-[#222222]" style={{ backgroundColor: c.bg, boxShadow: 'inset 0 0 0 1px ' + c.border }}>
+                    <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: c.color }} />{c.short || c.label} <span className="font-semibold" style={{ color: c.color }}>{c.count}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {showOriginal ? (
               <div className="grid gap-4 md:grid-cols-2 mb-4">
                 <div>
@@ -2995,30 +2980,30 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
                   <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto"><pre className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-[#444444]">{inputText}</pre></div>
                 </div>
                 <div>
-                  <div className="mb-2 text-xs font-semibold text-[#b00020]">SEUDONIMIZADO</div>
+                  <div className="mb-2 text-xs font-semibold text-[#b00020]">RESULTADO</div>
                   <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto max-h-80 overflow-y-auto"><HighlightedOutput text={result.out} reps={result.reps} cats={allCats} onExclude={excludeFromResult} /></div>
                 </div>
               </div>
             ) : (
               <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto"><HighlightedOutput text={result.out} reps={result.reps} cats={allCats} onExclude={excludeFromResult} /></div>
             )}
-            <p className="mt-2 text-xs text-[#6b6b6b]">Toca o pulsa Enter sobre una etiqueta para ver el dato original o dejarlo visible (lista blanca). «Copiar para la IA» añade una instrucción para que el modelo conserve las etiquetas.</p>
+            <p className="mt-2 text-xs text-[#6b6b6b]">Toca una etiqueta para ver el dato original o dejarlo visible. «Copiar para pegar en la IA» añade una instrucción para que el modelo conserve las etiquetas.</p>
           </section>
 
           {result.reps.length > 0 ? (
             <section className="rounded-[28px] border border-[#b00020] bg-white shadow-sm p-6" aria-labelledby="key-title">
               <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <h3 id="key-title" className="font-bold text-[#222222]">🔑 Llave de recuperación (confidencial)</h3>
-                  <InfoIcon text="Contiene los datos originales. Guárdala junto al documento para recuperar la respuesta de la IA en otra sesión. Nunca la pegues en un modelo de IA." />
+                <div>
+                  <h3 id="key-title" className="font-bold text-[#222222]">🔑 Llave para recuperar los datos originales</h3>
+                  <p className="mt-1 text-sm text-[#444444]">{keySaved ? 'Llave guardada. Úsala en «Recuperar» para volver a poner los nombres reales.' : 'Guárdala ahora. Si cierras esta pestaña sin guardarla, no podrás volver a poner los nombres reales.'}</p>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  <AppButton onClick={downloadKey}>{keySaved ? '✓ Llave guardada' : '↓ Guardar llave (.tsv)'}</AppButton>
-                  <AppButton variant="secondary" onClick={copyTable}>{copiedTable ? '✓ Copiada' : '📋 Copiar llave'}</AppButton>
-                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport}>↓ Respaldo .doc con originales</AppButton>
+                  <AppButton onClick={downloadKey}>{keySaved ? '✓ Llave guardada' : 'Guardar llave en mi equipo'}</AppButton>
+                  <AppButton variant="secondary" onClick={copyTable}>{copiedTable ? '✓ Copiada' : 'Copiar llave'}</AppButton>
+                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport} title={canExport ? '' : 'Disponible al marcar la revisión'}>Descargar Word con los originales</AppButton>
                 </div>
               </div>
-              {!keySaved ? <p className="mb-3 rounded-xl bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#b00020]">Si cierras o recargas esta pestaña sin guardar la llave, no podrás recuperar los datos originales.</p> : null}
+              <p className="mb-3 text-xs text-[#6b6b6b]">La llave contiene los datos reales. Guárdala con el documento y nunca la pegues en una IA.</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Equivalencias entre etiquetas y datos originales</caption>
@@ -3026,7 +3011,7 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
                     <th scope="col" className="py-2 pr-4 text-left font-semibold text-[#222222]">Etiqueta</th>
                     <th scope="col" className="py-2 pr-4 text-left font-semibold text-[#222222]">Dato original</th>
                     <th scope="col" className="py-2 pr-4 text-left font-semibold text-[#222222]">Veces</th>
-                    <th scope="col" className="py-2 text-left font-semibold text-[#222222]">Categoría</th>
+                    <th scope="col" className="py-2 text-left font-semibold text-[#222222]">Tipo</th>
                   </tr></thead>
                   <tbody>
                     {result.reps.map((r, i) => {
@@ -3034,9 +3019,9 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
                       return (
                         <tr key={i} className="border-b border-[#e5e5e5] last:border-0">
                           <td className="py-2 pr-4"><mark className="anon font-mono text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: cat ? cat.bg : '#f5f5f5', color: cat ? cat.color : '#333', border: '1.5px solid ' + (cat ? cat.color : '#9a9a9a') }}>{r.replacement}</mark></td>
-                          <td className="py-2 pr-4 font-mono text-xs text-[#333333] break-all">{r.original}{r.valid === true ? <span className="ml-1 text-[#15803d]" title="Dígito verificador válido">✓</span> : r.valid === false ? <span className="ml-1 text-[#b45309]" title="Formato reconocido, verificador no válido">?</span> : null}</td>
+                          <td className="py-2 pr-4 font-mono text-xs text-[#333333] break-all">{r.original}{r.valid === true ? <span className="ml-1 text-[#15803d]" title="Número verificado: el dígito de control es correcto">✓</span> : r.valid === false ? <span className="ml-1 text-[#b45309]" title="Tiene forma de identificación, pero el dígito de control no cuadra">?</span> : null}</td>
                           <td className="py-2 pr-4 text-xs text-[#6b6b6b]">{r.count || 1}</td>
-                          <td className="py-2 text-xs text-[#6b6b6b]">{r.catLabel}{r.hint ? ' · rango ' + r.hint : ''}</td>
+                          <td className="py-2 text-xs text-[#6b6b6b]">{(cat && cat.short) || r.catLabel}{r.hint ? ' · rango ' + r.hint : ''}</td>
                         </tr>
                       );
                     })}
@@ -3045,18 +3030,6 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
               </div>
             </section>
           ) : null}
-        </div>
-      ) : null}
-
-      {!result && !inputText ? (
-        <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-10 text-center">
-          <div className="text-4xl mb-3" aria-hidden="true">🔒</div>
-          <p className="text-lg font-semibold text-[#222222] mb-1">Antes de pegar información de tu empresa en una IA, pásala por aquí</p>
-          <p className="text-sm text-[#6b6b6b] mb-4">Nombres, identificaciones, teléfonos, cuentas y credenciales se sustituyen por etiquetas reversibles. Nada sale de tu navegador.</p>
-          <div className="flex justify-center gap-2 flex-wrap">
-            <AppButton onClick={trySample}>Probar con un ejemplo</AppButton>
-            <AppButton variant="secondary" onClick={() => setShowTemplates(true)}>📋 Plantillas por área</AppButton>
-          </div>
         </div>
       ) : null}
 
@@ -3124,30 +3097,30 @@ function RecoverTab({ lastResult }) {
     <div className="space-y-6">
       <LiveStatus message={status} />
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <h2 className="text-xl font-bold text-[#222222] mb-1">Recuperar los datos originales</h2>
-        <p className="text-sm text-[#6b6b6b]">Pega la respuesta de la IA y la app devuelve cada etiqueta <span className="font-mono">[TAG_N]</span> a su dato real. Tolera etiquetas alteradas por el modelo (<span className="font-mono">[PERSONA 1]</span>, <span className="font-mono">PERSONA_1</span>, <span className="font-mono">[PERSON_1]</span>, negritas).</p>
+        <h2 className="text-xl font-bold text-[#222222] mb-1">Vuelve a poner los datos reales en la respuesta de la IA</h2>
+        <p className="text-sm text-[#6b6b6b]">Pega lo que te contestó la IA. Cada etiqueta como <span className="font-mono">[PERSONA_1]</span> se cambia por el dato real, aunque el modelo la haya escrito distinto.</p>
       </div>
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b6b6b] mb-3" id="key-source">Fuente de la llave</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b6b6b] mb-3" id="key-source">Qué llave usar</p>
         <div className="mb-4 flex gap-3 flex-wrap" role="group" aria-labelledby="key-source">
           <button type="button" onClick={() => { setMode('auto'); setRecovered(null); }} aria-pressed={mode === 'auto'}
-            className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'auto' ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
-            <div className="font-bold mb-0.5">⚡ Sesión actual</div>
-            <div className={cn("text-xs font-normal", mode === 'auto' ? 'text-[#b00020]' : 'text-[#6b6b6b]')}>{lastResult ? lastResult.reps.length + ' etiquetas de la última sustitución' : 'Todavía no has procesado nada en esta sesión'}</div>
+            className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'auto' ? "border-2 border-[#222222] bg-[#fafafa] text-[#222222]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
+            <div className="font-bold mb-0.5">{mode === 'auto' ? '✓ ' : ''}Usar la llave de esta sesión</div>
+            <div className="text-xs font-normal text-[#6b6b6b]">{lastResult ? lastResult.reps.length + ' etiquetas de tu último texto' : 'Todavía no has ocultado nada en esta sesión'}</div>
           </button>
           <button type="button" onClick={() => { setMode('paste'); setRecovered(null); }} aria-pressed={mode === 'paste'}
-            className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'paste' ? "border-[#b00020] bg-[#fff5f6] text-[#b00020]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
-            <div className="font-bold mb-0.5">🔑 Archivo o tabla de llave</div>
-            <div className={cn("text-xs font-normal", mode === 'paste' ? 'text-[#b00020]' : 'text-[#6b6b6b]')}>Otra sesión: carga la llave .tsv o pega la tabla del respaldo .doc</div>
+            className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'paste' ? "border-2 border-[#222222] bg-[#fafafa] text-[#222222]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
+            <div className="font-bold mb-0.5">{mode === 'paste' ? '✓ ' : ''}Usar una llave guardada</div>
+            <div className="text-xs font-normal text-[#6b6b6b]">Sube el archivo de llave o pega la tabla del Word</div>
           </button>
         </div>
         {mode === 'paste' && (
           <div>
             <div className="mb-2 flex items-center gap-2 flex-wrap">
-              <label htmlFor="mapping-text" className="text-sm font-semibold text-[#222222]">Llave de recuperación</label>
-              <InfoIcon text="Carga el archivo LLAVE-CONFIDENCIAL… .tsv, o en Word selecciona la tabla de equivalencias del respaldo → Copiar → pega aquí, incluido el encabezado." />
-              <AppButton variant="secondary" onClick={() => keyInputRef.current && keyInputRef.current.click()}>↑ Cargar archivo de llave</AppButton>
+              <label htmlFor="mapping-text" className="text-sm font-semibold text-[#222222]">Llave guardada</label>
+              <InfoIcon text="Sube el archivo que empieza por LLAVE-CONFIDENCIAL, o abre el Word con los originales, selecciona la tabla, cópiala y pégala aquí con su encabezado." />
+              <AppButton variant="secondary" onClick={() => keyInputRef.current && keyInputRef.current.click()}>↑ Subir archivo de llave</AppButton>
               <input ref={keyInputRef} type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain" className="hidden" aria-label="Seleccionar archivo de llave" onChange={e => { loadKeyFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
             </div>
             <textarea id="mapping-text" rows={8} value={mappingText} onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
@@ -3158,12 +3131,14 @@ function RecoverTab({ lastResult }) {
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
         <div className="mb-2 flex items-center gap-2">
-          <label htmlFor="modified-text" className="text-sm font-semibold text-[#222222]">Respuesta de la IA</label>
-          <InfoIcon text="Pega aquí el texto que te devolvió ChatGPT, Claude, Gemini u otro modelo. Las etiquetas se sustituirán por los datos originales." />
+          <label htmlFor="modified-text" className="text-sm font-semibold text-[#222222]">Pega la respuesta de la IA</label>
         </div>
         <textarea id="modified-text" rows={12} value={modifiedText} onChange={e => { setModifiedText(e.target.value); setRecovered(null); }} className={fieldClass}
-          placeholder="Pega aquí la respuesta del modelo con las etiquetas [EMAIL_1], [TELEFONO_1], etc." />
-        <div className="mt-3"><AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>🔄 Recuperar datos originales</AppButton></div>
+          placeholder="Pega aquí lo que te contestó ChatGPT, Claude o Gemini. Las etiquetas como [PERSONA_1] se cambiarán por los datos reales." />
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
+          <AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>Recuperar datos originales</AppButton>
+          {!modifiedText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega una respuesta para activar el botón.</span> : !hasMappingSource ? <span className="text-xs text-[#6b6b6b]">Elige una llave arriba para activar el botón.</span> : null}
+        </div>
       </div>
 
       {recovered ? (

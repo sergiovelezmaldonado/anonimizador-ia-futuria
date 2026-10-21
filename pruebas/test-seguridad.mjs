@@ -100,6 +100,10 @@ test('un mismo término con ocurrencias solapadas cubre la unión y se recupera 
 });
 test('cero coincidencias nunca significa Listo para usar ni riesgo garantizado', () => {
   assert.equal(getRiskInfo(0).emoji, '🟡');
-  assert.match(getRiskInfo(0).label, /revisi[oó]n|revisar/i);
+  assert.match(getRiskInfo(0).label, /revisi[oó]n|revis[ae]/i);
   assert.doesNotMatch(getRiskInfo(0).label, /listo|seguro/i);
+  // Verde solo después de que una persona marque la revisión.
+  assert.equal(getRiskInfo(0, true).emoji, '🟢');
+  assert.match(getRiskInfo(0, true).label, /revisado/i);
+  assert.equal(getRiskInfo(1, true).emoji, '🔴');
 });

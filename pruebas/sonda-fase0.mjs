@@ -19,33 +19,31 @@ check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`document.
 check('«Empezar ahora» lleva a la vista de trabajo', await click('Empezar ahora')); await pause(300);
 check('vista de trabajo visible', await ev(`!!document.querySelector('#input-text')`));
 check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===4`));
-check('botón Probar con un ejemplo', await click('Probar con un ejemplo')); await pause(600);
+check('botón Ver un ejemplo ahora', await click('Ver un ejemplo ahora')); await pause(1200);
 check('resultado con etiquetas', await ev(`(document.body.innerText.match(/\\[[A-Z_]+_\\d+\\]/g)||[]).length>=6`));
 check('semáforo no bloquea el ejemplo (categorías inactivas solo avisan)', await ev(`!document.querySelector('input[data-review]').disabled`));
-check('aviso de categorías desactivadas visible', await ev(`/categor[ií]as desactivadas/i.test(document.body.innerText)`));
+check('aviso de tipos desactivados visible, sin jerga', await ev(`/Quedan posibles .* sin ocultar/i.test(document.body.innerText) && !/seudonimiz|heur[ií]stic/i.test(document.querySelector('[role=region][aria-label="Estado de revisión"]').innerText)`));
 check('etiquetas son botones (sin hover ni title)', await ev(`document.querySelectorAll('button.anon').length>=6 && !document.querySelector('button.anon[title]')`));
-await ev(`document.querySelector('button.anon').click()`); await pause(100);
+await pause(400); await ev(`document.querySelector('button.anon').click()`); await pause(150);
 check('tocar una etiqueta muestra el original', await ev(`!!document.querySelector('[role=dialog][aria-label="Dato original"]')`));
 check('botón de lista blanca en el popover', await ev(`/lista blanca/i.test(document.querySelector('[role=dialog][aria-label="Dato original"]').innerText)`));
-check('llave de recuperación con aviso de guardado', await ev(`/Guardar llave/.test(document.body.innerText) && /no podrás recuperar/i.test(document.body.innerText)`));
-check('copiar bloqueado antes de revisar', await ev(`[...document.querySelectorAll('button')].find(b=>/Copiar para la IA/.test(b.textContent)).disabled`));
+check('llave de recuperación con aviso de guardado', await ev(`/Guardar llave en mi equipo/.test(document.body.innerText) && /no podrás volver a poner los nombres reales/i.test(document.body.innerText)`));
+check('copiar bloqueado antes de revisar', await ev(`[...document.querySelectorAll('button')].find(b=>/Copiar para pegar en la IA/.test(b.textContent)).disabled`));
 await ev(`document.querySelector('input[data-review]').click()`); await pause(150);
-check('copiar habilitado tras revisar', await ev(`![...document.querySelectorAll('button')].find(b=>/Copiar para la IA/.test(b.textContent)).disabled`));
+check('copiar habilitado tras revisar', await ev(`![...document.querySelectorAll('button')].find(b=>/Copiar para pegar en la IA/.test(b.textContent)).disabled`));
 await ev(`window.__copied='';navigator.clipboard.writeText=t=>{window.__copied=t;return Promise.resolve()}`);
-await click('📋 Copiar para la IA'); await pause(200);
+await click('Copiar para pegar en la IA'); await pause(200);
 check('copiar para la IA incluye instrucción y sin originales', await ev(`/Consérvalas exactamente/.test(window.__copied) && !/María García/.test(window.__copied)`));
 check('aria-live presente', await ev(`document.querySelectorAll('[role=status][aria-live]').length>=1`));
-// el tooltip «?» se cierra al desplazar la página (no queda huérfano tapando el header)
-await ev(`document.querySelector('button[aria-label="Más información"]').click()`); await pause(100);
-check('tooltip abierto en portal', await ev(`!!document.querySelector('[data-popover][role=tooltip]')`));
-await ev(`window.scrollBy(0, 200)`); await pause(150);
-check('tooltip se cierra al hacer scroll', await ev(`!document.querySelector('[data-popover][role=tooltip]')`));
+// Sin tooltips «?» en la pestaña de trabajo (Krug). El tooltip de Recuperar vive en un portal y se cierra con Escape y al desplazar.
+check('la pestaña de trabajo no depende de tooltips «?»', await ev(`!document.querySelector('#main button[aria-label="Más información"]')`));
 check('header sticky opaco', await ev(`getComputedStyle(document.querySelector('.sticky.top-0')).backgroundColor==='rgb(255, 255, 255)'`));
-// los campos de términos y lista blanca muestran al menos 3 líneas al abrir el panel (no recortan el placeholder)
-await ev(`[...document.querySelectorAll('button')].find(b=>/Ajustar/.test(b.textContent)).click()`); await pause(200);
+check('campos de palabras propias visibles sin desplegar', await ev(`!!document.querySelector('#custom-terms') && !!document.querySelector('#whitelist') && document.querySelector('#custom-terms').offsetParent!==null`));
 const termsH = await ev(`document.querySelector('#custom-terms').getBoundingClientRect().height`);
 check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto=' + termsH);
 check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
+check('títulos numerados explican cada bloque sin abrir nada', await ev(`/1 · Pega tu texto/.test(document.body.innerText) && /2 · Qué tipos de datos se ocultan/.test(document.body.innerText) && /3 · Oculta siempre estas palabras/.test(document.body.innerText) && /4 · Deja visibles estas palabras/.test(document.body.innerText)`));
+check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Ver un ejemplo ahora/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
 // diálogos propios: Limpiar no usa window.confirm
 await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
 await click('Limpiar'); await pause(150);
@@ -55,10 +53,10 @@ check('diálogo cerrado y texto borrado', await ev(`!document.querySelector('[ro
 // Recuperar tolerante en la interfaz
 await ev(`document.querySelector('#input-text').focus()`);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#input-text');s.call(t,'Cliente: Ana Ruiz, correo ana@x.test, cel 0991234567');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-await click('🔒 Ocultar datos sensibles'); await pause(400);
+await click('Ocultar datos sensibles'); await pause(400);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Recuperar/.test(b.textContent)).click()`); await pause(300);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#modified-text');s.call(t,'Hola [PERSONA 1], te escribo a **[EMAIL_1]** y PERSONA_1 al [PHONE_1].');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-await click('🔄 Recuperar datos originales'); await pause(300);
+await click('Recuperar datos originales'); await pause(300);
 const recoveredText = await ev(`document.querySelector('pre')?.innerText || ''`);
 check('recuperación tolerante en UI', /Hola Ana Ruiz, te escribo a \*\*ana@x\.test\*\* y Ana Ruiz al (?:cel )?0991234567/.test(recoveredText), JSON.stringify(recoveredText));
 check('indica etiquetas reparadas', await ev(`/reparadas/.test(document.body.innerText)`));
@@ -67,8 +65,8 @@ check('valores restaurados resaltados', await ev(`document.querySelectorAll('pre
 await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 2, mobile: true }); await pause(300);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Ocultar datos/.test(b.textContent)).click()`); await pause(300);
 // Al cambiar de pestaña la vista de trabajo se vuelve a montar: se procesa de nuevo el ejemplo.
-await click('Probar con un ejemplo'); await pause(500);
-await click('🔎 Ver como documento'); await pause(400);
+await click('Ver un ejemplo ahora'); await pause(500);
+await click('Ver como documento'); await pause(400);
 const padding = await ev(`(()=>{const d=[...document.querySelectorAll('[role=dialog]')].find(x=>/Documento seudonimizado/.test(x.getAttribute('aria-label')||''));const el=d&&d.querySelector('.max-w-3xl');return el?parseFloat(getComputedStyle(el).paddingLeft):-1})()`);
 check('visor en móvil con margen fluido (<40px a 360px)', padding > 0 && padding < 40, 'padding=' + padding);
 check('sin desborde horizontal en móvil', await ev(`document.documentElement.scrollWidth<=360`));

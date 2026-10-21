@@ -40,9 +40,8 @@ async function main() {
   // --- pestaña de trabajo (aterriza ahí) y abrir el panel de ajustes colapsado ---
   await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ocultar datos/.test(x.innerText))?.click()`);
   await sleep(1000);
-  const abrioAjustes = await ev(`(()=>{const b=[...document.querySelectorAll('button[aria-expanded]')].find(x=>/Ajustar/.test(x.innerText));if(!b)return 'sin boton';if(b.getAttribute('aria-expanded')==='false')b.click();return b.getAttribute('aria-expanded');})()`);
-  await sleep(600);
-  check('el panel "Qué ocultar" se abre con Ajustar (aria-expanded)', await ev(`document.querySelector('button[aria-controls="cats-body"]')?.getAttribute('aria-expanded')==='true' && !document.getElementById('cats-body').hidden`), 'estado=' + abrioAjustes);
+  check('los campos de palabras propias están visibles sin desplegar nada', await ev(`['#custom-terms','#whitelist'].every(id=>{const t=document.querySelector(id);return t&&t.offsetParent!==null})`));
+  check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Qué tipos de datos se ocultan/.test(document.querySelector('#cats-title')?.innerText||'')`));
 
   const medir = () => ev(`JSON.stringify((()=>{
     const pick=(sel)=>{const t=document.querySelector(sel);if(!t)return null;return {ph:(t.placeholder||'').slice(0,28),rows:t.rows,alturaPx:Math.round(t.getBoundingClientRect().height),lineas:Math.round(t.getBoundingClientRect().height/parseFloat(getComputedStyle(t).lineHeight||'20'))}};
@@ -59,13 +58,13 @@ async function main() {
   check('Términos personalizados crece al pegar 10 líneas (>=9 líneas visibles)', despues.terminos && despues.terminos.alturaPx > terminos.alturaPx + 60 && despues.terminos.lineas >= 9,
     despues.terminos ? terminos.alturaPx + 'px -> ' + despues.terminos.alturaPx + 'px (~' + despues.terminos.lineas + ' lineas)' : '');
   await setValue('#custom-terms', ''); await sleep(300);
-  check('Texto a anonimizar tiene 14 filas', pegado && pegado.rows === 14, pegado ? 'rows=' + pegado.rows + ' alto=' + pegado.alturaPx + 'px' : 'no encontrado');
-  check('Texto a anonimizar es alto (>300px)', pegado && pegado.alturaPx > 300, pegado ? pegado.alturaPx + 'px' : '');
+  check('Texto a anonimizar tiene 12 filas', pegado && pegado.rows === 12, pegado ? 'rows=' + pegado.rows + ' alto=' + pegado.alturaPx + 'px' : 'no encontrado');
+  check('Texto a anonimizar es alto (>250px)', pegado && pegado.alturaPx > 250, pegado ? pegado.alturaPx + 'px' : '');
 
   // --- ventana emergente de plantillas ---
   const scrollAntes = await ev('window.scrollY');
-  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Plantillas de ejemplo/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
-  check('existe el boton "📋 Plantillas de ejemplo"', abrio);
+  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir una plantilla por área/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
+  check('existe el boton "Elegir una plantilla por área"', abrio);
   await sleep(1500);
 
   const modal = await ev(`JSON.stringify((()=>{
@@ -108,7 +107,7 @@ async function main() {
   check('se restaura el scroll del fondo', (await ev('document.body.style.overflow')) !== 'hidden', null);
 
   // seleccionar una plantilla sigue funcionando (sin texto previo no pide confirmación)
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Plantillas de ejemplo/i.test(x.innerText));b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir una plantilla por área/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1200);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelector('.grid button'); b&&b.click();})()`);
@@ -119,7 +118,7 @@ async function main() {
 
   // con texto previo, elegir otra plantilla pide confirmación con diálogo propio (Reemplazar)
   await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Plantillas de ejemplo/i.test(x.innerText));b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir una plantilla por área/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1000);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelectorAll('.grid button')[1]; b&&b.click();})()`);

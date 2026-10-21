@@ -138,7 +138,7 @@ async function main() {
   const marksTabla = await evalJs('document.querySelectorAll("table mark.anon").length');
   check('tabla de equivalencias conserva originales', txt.includes('maria.lopez@acmecorp.com') && marksTabla > 0, 'marks en tabla=' + marksTabla);
 
-  check('muestra semaforo de riesgo residual', /riesgo/i.test(txt) && await evalJs(`!!document.querySelector('[role=region][aria-label="Estado de revisión"] input[data-review]')`), null);
+  check('muestra semaforo de riesgo residual', /Revisa antes de copiar|Quedan datos por ocultar/i.test(txt) && await evalJs(`!!document.querySelector('[role=region][aria-label="Estado de revisión"] input[data-review]')`), null);
 
   // --- Privacidad: ninguna peticion a un backend ---
   const dominios = [...new Set(netRequests.map(u => { try { return new URL(u).host; } catch { return u; } }))];
