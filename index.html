@@ -691,7 +691,7 @@ function RiskSemaphore({ text, reviewed, onReview, activeIds, whitelist, riskDat
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4"
       style={{ backgroundColor: info.bg, borderColor: info.border }} role="region" aria-label="Estado de revisión">
-      <span className="text-2xl" aria-hidden="true">{info.emoji}</span>
+      <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base font-bold text-white" style={{ backgroundColor: info.color }}>{score > 0 ? '!' : reviewed ? '✓' : '?'}</span>
       <div>
         <div className="font-bold text-sm" style={{ color: info.color }} role={score > 0 ? 'alert' : undefined}>{info.label}</div>
         {hits.length > 0 ? (
@@ -2696,7 +2696,7 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
             <p className="mt-1 text-sm text-[#6b6b6b]">Los habituales ya están marcados. Marca o desmarca los que necesites.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Conjuntos predefinidos">
-            <span className="text-xs text-[#6b6b6b]">Conjunto:</span>
+            <span className="text-xs text-[#6b6b6b]">Selección rápida:</span>
             {PRESETS.map(p => {
               const selected = activePreset && activePreset.id === p.id;
               return (
@@ -2720,7 +2720,7 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
               style={c.on ? { backgroundColor: c.bg, boxShadow: 'inset 0 0 0 1px ' + c.border } : undefined}>
               <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] font-bold" style={c.on ? { borderColor: c.color, backgroundColor: c.color, color: '#fff' } : { borderColor: '#9a9a9a', backgroundColor: '#fff' }}>{c.on ? '✓' : ''}</span>
               <span>{c.short || c.label}</span>
-              {c.alwaysOn ? <span aria-hidden="true" className="text-xs">🔒</span> : null}
+              {c.alwaysOn ? <span className="text-xs text-[#6b6b6b]">· siempre</span> : null}
             </button>
           ))}
         </div>
@@ -2908,8 +2908,8 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
             <p className="mt-1 text-xs text-[#6b6b6b]">Prueba primero con un ejemplo: son 50 textos con datos inventados.</p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <AppButton variant="secondary" onClick={trySample}>Ver un ejemplo ahora</AppButton>
-            <AppButton variant="secondary" onClick={() => setShowTemplates(true)} disabled={uploading}>Más ejemplos: contratos, nómina, ventas…</AppButton>
+            <AppButton variant="secondary" className="border-[#222222]" onClick={trySample}>Ver un ejemplo ahora</AppButton>
+            <button type="button" onClick={() => setShowTemplates(true)} disabled={uploading} className="text-sm font-semibold text-[#333333] underline-offset-2 hover:underline disabled:text-[#8a8a8a]">Más ejemplos: contratos, nómina, ventas…</button>
           </div>
         </div>
       </section>
@@ -2966,12 +2966,9 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
                 <h3 id="output-title" className="font-bold text-[#222222]">Texto listo para la IA</h3>
                 <span className="text-sm text-[#6b6b6b]"><strong className="text-[#222222]">{totalDetected}</strong> datos ocultados · <strong className="text-[#222222]">{byCategory.length}</strong> tipos</span>
               </div>
-              <div className="flex gap-2 flex-wrap">
-                <AppButton onClick={() => copyOutput(true)} disabled={!canExport} title={canExport ? '' : 'Marca la casilla de revisión para activar'}>{copied ? '✓ Copiado' : 'Copiar para pegar en la IA'}</AppButton>
-                <AppButton variant="secondary" onClick={() => copyOutput(false)} disabled={!canExport}>Copiar solo el texto</AppButton>
-                <AppButton variant="secondary" onClick={() => setShowOriginal(v => !v)} aria-expanded={showOriginal}>{showOriginal ? 'Ocultar el original' : 'Ver original y resultado'}</AppButton>
-                <AppButton variant="secondary" onClick={openViewer}>Ver como documento</AppButton>
-                <AppButton variant="secondary" onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>Descargar .txt</AppButton>
+              <div className="flex items-center gap-3 flex-wrap text-sm">
+                <button type="button" onClick={() => setShowOriginal(v => !v)} aria-expanded={showOriginal} className="font-semibold text-[#333333] underline-offset-2 hover:underline">{showOriginal ? 'Ocultar el original' : 'Ver original y resultado'}</button>
+                <button type="button" onClick={openViewer} className="font-semibold text-[#333333] underline-offset-2 hover:underline">Ver como documento</button>
               </div>
             </div>
             {byCategory.length > 0 ? (
@@ -2997,7 +2994,15 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
             ) : (
               <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 overflow-x-auto"><HighlightedOutput text={result.out} reps={result.reps} cats={allCats} onExclude={excludeFromResult} /></div>
             )}
-            <p className="mt-2 text-xs text-[#6b6b6b]">Toca una etiqueta para ver el dato original o dejarlo visible. «Copiar para pegar en la IA» añade una instrucción para que el modelo conserve las etiquetas.</p>
+            <p className="mt-2 text-xs text-[#6b6b6b]">Toca una etiqueta para ver el dato original o dejarlo visible. El ✓ indica que el número de identificación o cuenta es válido.</p>
+            <div className="mt-4 flex items-center justify-between gap-3 flex-wrap border-t border-[#e5e5e5] pt-4">
+              <span className="text-xs text-[#6b6b6b]">{canExport ? '«Copiar para pegar en la IA» añade una instrucción para que el modelo conserve las etiquetas.' : riskData.hits.length ? 'Para copiar: primero retira los datos que quedan por ocultar.' : 'Para copiar: marca arriba «Revisé el texto…».'}</span>
+              <div className="flex gap-2 flex-wrap">
+                <AppButton variant="secondary" onClick={() => copyOutput(false)} disabled={!canExport}>Copiar solo el texto</AppButton>
+                <AppButton variant="secondary" onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>Descargar .txt</AppButton>
+                <AppButton onClick={() => copyOutput(true)} disabled={!canExport}>{copied ? '✓ Copiado' : 'Copiar para pegar en la IA'}</AppButton>
+              </div>
+            </div>
           </section>
 
           {result.reps.length > 0 ? (
@@ -3010,9 +3015,10 @@ function WorkTab({ setLastResult, lastResult, initialMode }) {
                 <div className="flex gap-2 flex-wrap">
                   <AppButton onClick={downloadKey}>{keySaved ? '✓ Llave guardada' : 'Guardar llave en mi equipo'}</AppButton>
                   <AppButton variant="secondary" onClick={copyTable}>{copiedTable ? '✓ Copiada' : 'Copiar llave'}</AppButton>
-                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport} title={canExport ? '' : 'Disponible al marcar la revisión'}>Descargar Word con los originales</AppButton>
+                  <AppButton variant="secondary" onClick={downloadDocs} disabled={!canExport}>Descargar Word con los originales</AppButton>
                 </div>
               </div>
+              {!canExport ? <p className="mb-2 text-xs text-[#6b6b6b]">El Word con los originales se activa al marcar arriba «Revisé el texto…».</p> : null}
               <p className="mb-3 text-xs text-[#6b6b6b]">La llave contiene los datos reales. Guárdala con el documento y nunca la pegues en una IA.</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
