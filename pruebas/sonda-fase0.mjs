@@ -15,7 +15,7 @@ await send('Runtime.enable'); await send('Page.enable');
 await send('Page.navigate', { url: 'http://localhost:5199/?t=' + Date.now() });
 await pause(4500);
 check('sin errores de compilación/runtime', errors.length === 0, errors.slice(0, 3).join(' | '));
-check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`document.querySelector('[role=tab]').textContent.trim()==='Cómo usar' && document.querySelector('[role=tab][aria-selected=true]').textContent.trim()==='Cómo usar'`));
+check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`/Cómo usar$/.test(document.querySelector('[role=tab]').textContent.trim()) && /Cómo usar$/.test(document.querySelector('[role=tab][aria-selected=true]').textContent.trim())`));
 check('«Empezar ahora» lleva a la vista de trabajo', await click('Empezar ahora')); await pause(300);
 check('vista de trabajo visible', await ev(`!!document.querySelector('#input-text')`));
 check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===4`));

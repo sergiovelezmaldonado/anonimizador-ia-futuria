@@ -1269,9 +1269,9 @@ function HowToTab({ onStart }) {
       tip: 'Los archivos descargados y el portapapeles no se borran al cerrar la app; cuida dónde quedan.' },
   ];
   const whyItems = [
-    { icon: '🏢', title: 'Lo que pegas en una IA sale de tu empresa', body: 'ChatGPT, Gemini, Claude o Copilot procesan tu texto en servidores de terceros. Según el plan y la configuración, puede quedar almacenado o usarse para entrenar modelos. Un contrato, una nómina o una historia clínica no deberían viajar con nombres y cédulas reales.' },
+    { icon: '🏢', title: 'Lo que pegas sale de tu empresa', body: 'ChatGPT, Gemini, Claude o Copilot procesan tu texto en servidores de terceros. Según el plan y la configuración, puede quedar almacenado o usarse para entrenar modelos. Un contrato, una nómina o una historia clínica no deberían viajar con nombres y cédulas reales.' },
     { icon: '⚖️', title: 'La ley te obliga', body: 'Las leyes de protección de datos de Hispanoamérica (Ecuador, Colombia, México, Argentina, Chile, Perú, España…) exigen tratar los datos personales con una finalidad clara y medidas de seguridad. Compartirlos con un proveedor de IA sin control puede acarrear sanciones y pérdida de confianza de clientes y empleados.' },
-    { icon: '✅', title: 'La IA funciona igual sin los datos reales', body: 'Para resumir, redactar, traducir o analizar, el modelo no necesita saber quién es [PERSONA_1] ni cuál es su número de cuenta. Cambias los datos por etiquetas, obtienes la respuesta y los recuperas al final. Nadie fuera de tu equipo ve la información real.' },
+    { icon: '✅', title: 'La IA funciona igual sin los datos reales', body: 'Para resumir, redactar, traducir o analizar, el modelo no necesita saber el nombre real del cliente ni su número de cuenta. Cambias los datos por etiquetas, obtienes la respuesta y los recuperas al final. Nadie fuera de tu equipo ve la información real.' },
   ];
   const glossary = [
     ['Dato personal o sensible', 'Cualquier información que identifica a una persona o permite identificarla: nombre, cédula, teléfono, correo, dirección, cuenta bancaria, fecha de nacimiento, datos de salud.'],
@@ -1309,7 +1309,7 @@ function HowToTab({ onStart }) {
         <p className="mb-5 text-sm text-[#333333]">Cada vez que pegas un documento en ChatGPT, Gemini o Claude, estás entregando a un tercero los nombres, cédulas, teléfonos y cuentas de tus clientes y empleados. Esta app los cambia por etiquetas antes de que salgan, y te los devuelve después.</p>
         <div className="grid gap-4 md:grid-cols-3">
           {whyItems.map(w => (
-            <div key={w.title} className="rounded-2xl border border-[#e5e5e5] bg-white p-4">
+            <div key={w.title} className="p-1">
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-xl" aria-hidden="true">{w.icon}</span>
                 <h3 className="font-semibold text-[#222222]">{w.title}</h3>
@@ -1336,7 +1336,7 @@ function HowToTab({ onStart }) {
               <div className="min-w-0 flex-1 pt-0.5">
                 <h3 className="font-semibold text-[#222222]"><span aria-hidden="true" className="mr-1.5">{s.icon}</span>{s.title}</h3>
                 <p className="mt-1 text-sm leading-relaxed text-[#333333]">{s.desc}</p>
-                <p className="mt-2 rounded-xl bg-[#fafafa] px-3 py-2 text-xs text-[#6b6b6b]"><span className="font-semibold text-[#2A5B8C]">Consejo:</span> {s.tip}</p>
+                <p className="mt-2 rounded-xl bg-[#f3f4f6] px-3 py-2 text-xs text-[#333333]"><span className="font-semibold text-[#2A5B8C]">Consejo:</span> {s.tip}</p>
               </div>
             </li>
           ))}
@@ -3232,10 +3232,10 @@ function RecoverTab({ lastResult }) {
 
 // ─── App principal ────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'how', label: 'Cómo usar' },
+  { id: 'how', label: '📖 Cómo usar' },
   { id: 'work', label: '🔒 Anonimizar texto' },
   { id: 'recover', label: '🔄 Recuperar datos reales' },
-  { id: 'privacy', label: 'Privacidad' },
+  { id: 'privacy', label: '🛡️ Privacidad' },
 ];
 
 function App() {
@@ -3276,7 +3276,7 @@ function App() {
             </div>
           </div>
           <div className="hidden items-center gap-2 sm:flex">
-            <AppButton variant="secondary" onClick={clearSession}>Borrar sesión</AppButton>
+            {(lastResult || tab !== 'how') ? <AppButton variant="secondary" onClick={clearSession}>Borrar sesión</AppButton> : null}
             <AppButton variant="secondary" onClick={() => setAboutOpen(true)}>Acerca de</AppButton>
           </div>
           <div className="relative sm:hidden">
@@ -3284,7 +3284,7 @@ function App() {
               className="min-h-[44px] min-w-[44px] rounded-2xl border border-[#9a9a9a] px-3 text-lg">☰</button>
             {menuOpen ? (
               <div role="menu" className="absolute right-0 top-12 z-50 w-48 rounded-2xl border border-[#9a9a9a] bg-white p-2 shadow-xl">
-                <button role="menuitem" type="button" onClick={clearSession} className="block min-h-[44px] w-full rounded-xl px-3 text-left text-sm font-semibold hover:bg-[#fff5f6]">Borrar sesión</button>
+                {(lastResult || tab !== 'how') ? <button role="menuitem" type="button" onClick={clearSession} className="block min-h-[44px] w-full rounded-xl px-3 text-left text-sm font-semibold hover:bg-[#fff5f6]">Borrar sesión</button> : null}
                 <button role="menuitem" type="button" onClick={() => { setAboutOpen(true); setMenuOpen(false); }} className="block min-h-[44px] w-full rounded-xl px-3 text-left text-sm font-semibold hover:bg-[#fff5f6]">Acerca de</button>
               </div>
             ) : null}
