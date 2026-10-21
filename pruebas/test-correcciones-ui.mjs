@@ -50,8 +50,20 @@ function context(h, extra = {}) {
   vm.runInContext(engine, ctx);
   return ctx;
 }
-// Índices de estado de WorkTab, en orden de declaración.
-const W = { inputText:0, sourceName:1, result:2, reviewed:3, cats:4, customTerms:5, whitelist:6 };
+// Índices de estado de WorkTab, en orden de declaración (los ajustes viven en App y llegan por props).
+const W = { inputText:0, sourceName:1, result:2, reviewed:3 };
+// Ajustes falsos: mismo contrato que useSettings().
+function fakeSettings(ctx, over = {}) {
+  const st = { cats: vm.runInContext('CATS', ctx).map(c => ({...c})), customTerms:'', whitelist:'', version:0 };
+  return Object.assign(st, {
+    toggleCat(id){ st.cats = st.cats.map(c => c.id===id && !c.alwaysOn ? {...c, on:!c.on} : c); st.version++; },
+    applyPreset(){ st.version++; }, setCatsForTemplate(){ st.version++; },
+    updateCustomTerms(v){ st.customTerms=v; st.version++; }, updateWhitelist(v){ st.whitelist=v; st.version++; },
+    addCustomTerm(t){ st.customTerms = (st.customTerms.trim()? st.customTerms+'\n':'') + t; st.version++; },
+    addWhitelistTerm(t){ st.whitelist = (st.whitelist.trim()? st.whitelist+'\n':'') + t; st.version++; },
+    reset(){}, ...over });
+}
+const mount = (ctx, h, extra = {}) => ctx.WorkTab({setLastResult:()=>{}, settings: ctx.__settings ||= fakeSettings(ctx), onOpenSettings(){}, ...extra});
 const original = '  María\tGarcía\r\nLópez  ';
 const rep = {replacement:'[PERSONA_1]', original, catId:'person', catLabel:'Persona', hint:null, count:1, valid:null};
 test('copiar llave utiliza el mapa JSON reversible con columnas completas', async () => {
@@ -59,7 +71,7 @@ test('copiar llave utiliza el mapa JSON reversible con columnas completas', asyn
   let clipboard;
   const ctx = context(h, {copyLocalText:async text => {clipboard=text;return true;}});
   vm.runInContext(componentLogic('WorkTab', '// ─── Pestaña Recuperar', '{copyTable}'), ctx);
-  h.begin(); await ctx.WorkTab({setLastResult:()=>{}}).copyTable();
+  h.begin(); await mount(ctx, h).copyTable();
   await Promise.resolve(); await Promise.resolve();
   assert.match(clipboard, /Original \(JSON\)/);
   assert.equal(ctx.parseEquivalences(clipboard)['[PERSONA_1]'], original);
@@ -71,7 +83,7 @@ test('copiar llave cancelada no escribe en el portapapeles', async () => {
   let clipboard = null;
   const ctx = context(h, {copyLocalText:async text => {clipboard=text;return true;}});
   vm.runInContext(componentLogic('WorkTab', '// ─── Pestaña Recuperar', '{copyTable}'), ctx);
-  h.begin(); await ctx.WorkTab({setLastResult:()=>{}}).copyTable();
+  h.begin(); await mount(ctx, h).copyTable();
   assert.equal(clipboard, null);
 });
 test('Recuperar decodifica mapa JSON sin modificar espacios, TAB ni CRLF', () => {
@@ -145,7 +157,7 @@ test('la vista de trabajo asigna una generación nueva por resultado, aunque el 
   const h = hooks(); const ctx = context(h);
   h.slots[W.inputText] = 'Paciente: María García.';
   vm.runInContext(componentLogic('WorkTab', '// ─── Pestaña Recuperar', '{anonymize, openViewer}'), ctx);
-  const run = method => { h.begin(); ctx.WorkTab({setLastResult:()=>{}})[method](); };
+  const run = method => { h.begin(); mount(ctx, h)[method](); };
   run('anonymize'); run('openViewer');
   const first = { ...viewerSlot(h) };
   run('anonymize'); run('openViewer');
@@ -155,16 +167,19 @@ test('la vista de trabajo asigna una generación nueva por resultado, aunque el 
   assert.ok(second.generation > first.generation);
   assert.match(slice('function WorkTab(', '// ─── Pestaña Recuperar'), /resultIdentity=\{viewerData\.generation\}/);
 });
-test('el resultado se invalida al cambiar categorías o al añadir a la lista blanca', () => {
+test('el resultado se invalida al cambiar ajustes (desde la pestaña Ajustes) o al dejar visible una etiqueta', () => {
   const h = hooks(); const ctx = context(h);
   h.slots[W.inputText] = 'Cliente: Ana Ruiz'; h.slots[W.result] = {out:'x', reps:[]};
-  vm.runInContext(componentLogic('WorkTab', '// ─── Pestaña Recuperar', '{toggleCat, excludeFromResult}'), ctx);
-  h.begin(); ctx.WorkTab({setLastResult:()=>{}}).toggleCat('email');
-  assert.equal(h.slots[W.result], null);
+  vm.runInContext(componentLogic('WorkTab', '// ─── Pestaña Recuperar', '{excludeFromResult}'), ctx);
+  const settings = fakeSettings(ctx);
+  h.begin(); mount(ctx, h, {settings}); h.commit();          // primer render: fija la versión inicial
+  settings.toggleCat('email');                               // cambio hecho en Ajustes
+  h.begin(); mount(ctx, h, {settings}); h.commit();          // re-render de WorkTab con la nueva versión
+  assert.equal(h.slots[W.result], null, 'el resultado debe quedar obsoleto al cambiar un tipo en Ajustes');
   h.slots[W.result] = {out:'x', reps:[]};
-  h.begin(); ctx.WorkTab({setLastResult:()=>{}}).excludeFromResult({original:'Acme'});
+  h.begin(); mount(ctx, h, {settings}).excludeFromResult({original:'Acme'});
   assert.equal(h.slots[W.result], null);
-  assert.ok(h.slots.some(s => typeof s === 'string' && /Acme/.test(s)), 'lista blanca con Acme: ' + JSON.stringify(h.slots.filter(s => typeof s === 'string')));
+  assert.match(settings.whitelist, /Acme/);
 });
 test('visor invalida revisión ante una identidad nueva con anonText idéntico', () => {
   const f = viewerFixture(); const identity={}; const same=props(identity);

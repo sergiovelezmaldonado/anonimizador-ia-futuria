@@ -74,7 +74,8 @@ async function main() {
   const tabs = JSON.parse(await evalJs('JSON.stringify(Array.from(document.querySelectorAll("[role=tablist] [role=tab]")).map(b=>b.innerText.trim()))'));
   for (const t of ['Cómo usar', 'Anonimizar texto', 'Privacidad'])
     check('pestana presente: ' + t, tabs.some(x => x.includes(t)), 'tabs=' + tabs.join(' / '));
-  check('pestana Recuperar presente', tabs.some(x => x.includes('Recuperar')));
+  check('pestana Restaurar datos originales presente', tabs.some(x => x.includes('Restaurar datos originales')));
+  check('pestana Ajustes presente y en segundo lugar', /Ajustes$/.test(tabs[1] || ''), 'tabs=' + tabs.join(' / '));
   check('«Cómo usar» es la primera pestaña y la de llegada', /Cómo usar$/.test(tabs[0]) && await evalJs(`/Cómo usar$/.test(document.querySelector('[role=tab][aria-selected=true]').innerText.trim())`));
 
   // --- Flujo real: ir a la pestaña de trabajo; pegar, anonimizar ---

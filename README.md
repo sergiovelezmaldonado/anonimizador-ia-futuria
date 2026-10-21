@@ -1,6 +1,6 @@
 # Anonimizador IA — FuturIA (App 7)
 
-> **Fase 0 (2026-10-20): 212/212 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
+> **Fase 0 (2026-10-20): 219/219 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
 
 Oculta datos sensibles de la información de tu empresa **antes** de pegarla en ChatGPT,
 Claude, Gemini o cualquier otro modelo. El reemplazo es reversible: cada dato
@@ -77,7 +77,7 @@ node pruebas/sonda-correccion.mjs       # 12 · saltos de línea y límites de c
 node pruebas/sonda-interfaz.mjs         # 18 · tamaños y ventana emergente
 ```
 
-**212 comprobaciones verificadas el 2026-10-20**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
+**219 comprobaciones verificadas el 2026-10-20**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
 pinneadas, Tailwind efectivamente aplicado, el flujo completo de anonimización,
 que ningún dato crudo quede en el bloque de salida, que la tabla de equivalencias
 sí conserve los originales (reversibilidad), que no haya peticiones a ningún

@@ -9,7 +9,7 @@ ws.addEventListener('message', ev => { const m = JSON.parse(ev.data); if (m.id &
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async expr => { const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'eval'); return r.result.result.value; };
 const pause = ms => new Promise(r => setTimeout(r, ms));
-const click = async txt => ev(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim().startsWith(${JSON.stringify(txt)}));if(!b)return false;b.click();return true})()`);
+const click = async txt => ev(`(()=>{const b=[...document.querySelectorAll('button')].filter(b=>!b.closest('[hidden]')).find(b=>b.textContent.trim().startsWith(${JSON.stringify(txt)}));if(!b)return false;b.click();return true})()`);
 let ok = 0, fail = 0; const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log((cond ? '✔ ' : '✖ ') + name + (cond ? '' : '  ' + extra)); };
 await send('Runtime.enable'); await send('Page.enable');
 await send('Page.navigate', { url: 'http://localhost:5199/?t=' + Date.now() });
@@ -18,7 +18,7 @@ check('sin errores de compilación/runtime', errors.length === 0, errors.slice(0
 check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`/Cómo usar$/.test(document.querySelector('[role=tab]').textContent.trim()) && /Cómo usar$/.test(document.querySelector('[role=tab][aria-selected=true]').textContent.trim())`));
 check('«Empezar ahora» lleva a la vista de trabajo', await click('Empezar ahora')); await pause(300);
 check('vista de trabajo visible', await ev(`!!document.querySelector('#input-text')`));
-check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===4`));
+check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===5`));
 const pickExample = async () => { const ok = await click('Elegir un ejemplo'); await pause(900); await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');const b=d&&d.querySelector('.grid button');b&&b.click();})()`); await pause(700); await click('Ocultar datos sensibles'); await pause(600); return ok; };
 check('botón Elegir un ejemplo abre la ventana y procesa', await pickExample());
 check('resultado con etiquetas', await ev(`(document.body.innerText.match(/\\[[A-Z_]+_\\d+\\]/g)||[]).length>=6`));
@@ -39,12 +39,21 @@ check('aria-live presente', await ev(`document.querySelectorAll('[role=status][a
 // Sin tooltips «?» en la pestaña de trabajo (Krug). El tooltip de Recuperar vive en un portal y se cierra con Escape y al desplazar.
 check('la pestaña de trabajo no depende de tooltips «?»', await ev(`!document.querySelector('#main button[aria-label="Más información"]')`));
 check('header sticky opaco', await ev(`getComputedStyle(document.querySelector('.sticky.top-0')).backgroundColor==='rgb(255, 255, 255)'`));
-check('campos de palabras propias visibles sin desplegar', await ev(`!!document.querySelector('#custom-terms') && !!document.querySelector('#whitelist') && document.querySelector('#custom-terms').offsetParent!==null`));
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Ajustes$/.test(b.textContent)).click()`); await pause(400);
+check('en Ajustes, campos de palabras propias visibles sin desplegar', await ev(`!!document.querySelector('#custom-terms') && !!document.querySelector('#whitelist') && document.querySelector('#custom-terms').offsetParent!==null`));
 const termsH = await ev(`document.querySelector('#custom-terms').getBoundingClientRect().height`);
 check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto=' + termsH);
 check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
-check('títulos numerados explican cada bloque sin abrir nada', await ev(`/1 · Pega tu texto/.test(document.body.innerText) && /2 · Qué tipos de datos se ocultan/.test(document.body.innerText) && /3 · Oculta siempre estas palabras/.test(document.body.innerText) && /4 · Deja visibles estas palabras/.test(document.body.innerText)`));
+check('títulos de Ajustes explican cada bloque sin abrir nada', await ev(`/2 · Qué tipos de datos se ocultan/.test(document.body.innerText) && /3 · Oculta siempre estas palabras/.test(document.body.innerText) && /4 · Deja visibles estas palabras/.test(document.body.innerText)`));
+// Un cambio en Ajustes deja obsoleto el resultado de la pestaña de trabajo
+await ev(`[...document.querySelectorAll('#cats-body button')].find(b=>b.getAttribute('aria-pressed')==='false' && !b.disabled).click()`); await pause(200);
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(400);
+check('la pestaña de trabajo conserva el texto pero invalida el resultado tras cambiar Ajustes', await ev(`document.querySelector('#input-text').value.length>50 && !document.querySelector('#output-title')`));
+check('resumen de ajustes con enlace en la pestaña de trabajo', await ev(`/Cambiar en Ajustes/.test(document.querySelector('[data-settings-summary]')?.innerText||'')`));
+await click('Ocultar datos sensibles'); await pause(600);
+check('«¿Se escapó algo? Ocultar también» disponible en el resultado', await ev(`!!document.querySelector('#extra-term')`));
 check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Elegir un ejemplo/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
+check('1 · Pega tu texto sigue en la pestaña de trabajo', await ev(`/1 · Pega tu texto/.test(document.body.innerText)`));
 // diálogos propios: Limpiar no usa window.confirm
 await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
 await click('Limpiar'); await pause(150);
@@ -58,16 +67,16 @@ check('«Por qué anonimizar» aparece antes de «Cómo usar»', await ev(`(()=>
 check('categorías y glosario plegados al llegar', await ev(`!document.querySelector('#howto-cats') && !document.querySelector('#howto-glossary')`));
 await ev(`document.querySelector('[aria-controls="howto-glossary"]').click()`); await pause(150);
 check('el glosario se despliega y explica «Llave» y «Etiqueta»', await ev(`(()=>{const g=document.querySelector('#howto-glossary');return g&&/Llave/.test(g.innerText)&&/Etiqueta/.test(g.innerText)&&!/PII|Seudonimizaci|heur[ií]stic/.test(g.innerText)})()`));
-check('pestañas con nombres que dicen qué hacen', await ev(`(()=>{const t=[...document.querySelectorAll('[role=tab]')].map(x=>x.textContent);return t.some(x=>/Anonimizar texto/.test(x))&&t.some(x=>/Recuperar datos reales/.test(x))})()`));
+check('pestañas con nombres que dicen qué hacen', await ev(`(()=>{const t=[...document.querySelectorAll('[role=tab]')].map(x=>x.textContent);return t.some(x=>/Anonimizar texto/.test(x))&&t.some(x=>/Restaurar datos originales/.test(x))&&t.some(x=>/Ajustes/.test(x))})()`));
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(300);
 // Recuperar tolerante en la interfaz
 await ev(`document.querySelector('#input-text').focus()`);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#input-text');s.call(t,'Cliente: Ana Ruiz, correo ana@x.test, cel 0991234567');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
 await click('Ocultar datos sensibles'); await pause(400);
-await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Recuperar/.test(b.textContent)).click()`); await pause(300);
+await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Restaurar datos originales/.test(b.textContent)).click()`); await pause(300);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#modified-text');s.call(t,'Hola [PERSONA 1], te escribo a **[EMAIL_1]** y PERSONA_1 al [PHONE_1].');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
 await click('Recuperar datos originales'); await pause(300);
-const recoveredText = await ev(`document.querySelector('pre')?.innerText || ''`);
+const recoveredText = await ev(`[...document.querySelectorAll('pre')].find(p=>!p.closest('[hidden]'))?.innerText || ''`);
 check('recuperación tolerante en UI', /Hola Ana Ruiz, te escribo a \*\*ana@x\.test\*\* y Ana Ruiz al (?:cel )?0991234567/.test(recoveredText), JSON.stringify(recoveredText));
 check('indica etiquetas reparadas', await ev(`/reparadas/.test(document.body.innerText)`));
 check('valores restaurados resaltados', await ev(`document.querySelectorAll('pre mark').length>=3`));

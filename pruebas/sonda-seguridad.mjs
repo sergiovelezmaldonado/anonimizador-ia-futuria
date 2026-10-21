@@ -19,7 +19,7 @@ const send = (method, params = {}) => new Promise(resolve => { const i = ++id; p
 const ev = async expression => { const m = await send('Runtime.evaluate', {expression, awaitPromise:true, returnByValue:true, userGesture:true}); if (m.result?.exceptionDetails) throw new Error(m.result.exceptionDetails.exception?.description || m.result.exceptionDetails.text); return m.result?.result?.value; };
 const pause = ms => new Promise(r => setTimeout(r, ms));
 // Botón accionable por texto exacto (fuera de los diálogos propios).
-const click = async label => { const ok = await ev(`(()=>{const b=[...document.querySelectorAll('button')].filter(b=>!b.closest('[role=alertdialog]')).find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!b||b.disabled)return false;b.click();return true})()`); assert.ok(ok, 'botón accionable: '+label); await pause(150); };
+const click = async label => { const ok = await ev(`(()=>{const b=[...document.querySelectorAll('button')].filter(b=>!b.closest('[role=alertdialog]')&&!b.closest('[hidden]')).find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!b||b.disabled)return false;b.click();return true})()`); assert.ok(ok, 'botón accionable: '+label); await pause(150); };
 const tab = async name => { const ok = await ev(`(()=>{const b=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.includes(${JSON.stringify(name)}));if(!b)return false;b.click();return true})()`); assert.ok(ok, 'pestaña: '+name); await pause(400); };
 const fill = async (selector, value) => { assert.ok(await ev(`(()=>{const t=document.querySelector(${JSON.stringify(selector)});if(!t)return false;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,${JSON.stringify(value)});t.dispatchEvent(new Event('input',{bubbles:true}));return true})()`), selector); await pause(150); };
 // Diálogos propios: leer el mensaje y pulsar un botón por texto.
@@ -100,7 +100,7 @@ try {
   check('impresión mediante marco oculto sin ventana emergente', await ev('window.__printed===true && !!document.querySelector("iframe[aria-hidden=true]")'));
   check('HTML de impresión sin originales ni nombre del archivo', !!printed && printed.includes('[PERSONA_1]') && !printed.includes('Nuria Ramos') && !printed.includes('nuria@ejemplo.test') && !printed.includes('expediente-Nuria-Ramos.txt'));
   await click('← Cerrar'); await pause(200);
-  await tab('Recuperar');
+  await tab('Restaurar datos originales');
   check('Documento comparte el mapa con Recuperar', await ev('/etiquetas de tu último texto/i.test(document.body.innerText)'));
   await fill('#modified-text','Respuesta: [PERSONA_1] y [EMAIL_1].'); await click('Recuperar datos originales'); await pause(200);
   check('recuperación de Documento restituye nombres y correos', await ev('document.body.innerText.includes("Nuria Ramos") && document.body.innerText.includes("nuria@ejemplo.test")'));
@@ -110,11 +110,11 @@ try {
   await click('Copiar llave'); await waitDialog(); await dialogButton('Copiar llave'); await pause(300);
   const copiedMap=await ev('window.__mapCopied');
   check('copia del mapa usa original JSON sin tabulaciones crudas', /Original \(JSON\)/.test(copiedMap) && copiedMap.includes('María\\tGarcía'));
-  await tab('Recuperar');
+  await tab('Restaurar datos originales');
   await ev(`[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Usar una llave guardada')).click()`); await pause(200);
   await fill('#mapping-text',copiedMap);
   await fill('#modified-text','Dato: [PERSONA_1]'); await click('Recuperar datos originales'); await pause(200);
-  check('copiar y pegar mapa en interfaz recupera tabulación exacta', await ev('document.querySelector("pre")?.textContent===\'Dato: María\\tGarcía\''));
+  check('copiar y pegar mapa en interfaz recupera tabulación exacta', await ev('[...document.querySelectorAll("pre")].find(p=>!p.closest("[hidden]"))?.textContent===\'Dato: María\\tGarcía\''));
   await fill('#mapping-text','Etiqueta\tOriginal (JSON)\n[PERSONA_1]\tJSON_INVALIDO');
   await click('Recuperar datos originales'); await waitDialog();
   check('mapa mal formado genera aviso y no excepción', /JSON inválido/i.test(await dialogMsg()) && errors.length===0);
@@ -124,7 +124,7 @@ try {
   check('privacidad sin promesas de borrado absoluto', !/sin rastros|privacidad garantizada/i.test(privacy));
   check('privacidad explica descargas y portapapeles', /portapapeles/i.test(privacy) && /descargas/i.test(privacy));
   await click('Borrar sesión'); await waitDialog(); await dialogButton('Borrar sesión'); await pause(300);
-  await tab('Recuperar');
+  await tab('Restaurar datos originales');
   check('borrar sesión elimina el mapa de recuperación', await ev('/Todavía no has ocultado nada|Todavía no has procesado nada|no hay|anonimiza primero/i.test(document.body.innerText) && !/etiquetas de tu último texto/i.test(document.body.innerText)'));
   check('ningún alert()/confirm() nativo en todo el flujo', await ev('window.__native.alert===0 && window.__native.confirm===0'));
   const pdf64 = readFileSync(new URL('prueba-multipagina.pdf', import.meta.url)).toString('base64');
@@ -139,7 +139,7 @@ try {
   check('contenido de documentos ausente de peticiones HTTP', requests.every(r=>!/(maria@ejemplo|Lucía Torres|lucia@ejemplo|Nuria Ramos)/i.test(r.url+' '+(r.postData||''))));
   await send('Page.reload',{ignoreCache:true}); await pause(500);
   for(let n=0;n<80;n++){if(await ev('!!document.querySelector("#input-text")'))break;await pause(250);}
-  await tab('Recuperar');
+  await tab('Restaurar datos originales');
   check('recarga no restaura documentos ni equivalencias', await ev('!/etiquetas de la última sustitución/i.test(document.body.innerText)'));
   check('sin excepciones de página',errors.length===0);
   if (errors.length) console.log('excepciones: ' + errors.slice(0, 3).join(' | '));

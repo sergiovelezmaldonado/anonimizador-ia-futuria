@@ -37,16 +37,21 @@ async function main() {
 
   check('la app arranca sin excepciones', errs.length === 0, errs.join(' | '));
 
-  // --- pestaña de trabajo (aterriza ahí) y abrir el panel de ajustes colapsado ---
-  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
-  await sleep(1000);
+  // --- pestaña Ajustes: tipos y palabras propias viven aquí, no en la de trabajo ---
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ajustes$/.test(x.innerText))?.click()`);
+  await sleep(800);
   check('los campos de palabras propias están visibles sin desplegar nada', await ev(`['#custom-terms','#whitelist'].every(id=>{const t=document.querySelector(id);return t&&t.offsetParent!==null})`));
   check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Qué tipos de datos se ocultan/.test(document.querySelector('#cats-title')?.innerText||'')`));
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
+  await sleep(800);
+  check('la pestaña de trabajo no muestra el panel de tipos (sin ruido)', await ev(`!document.querySelector('#cats-title') && !document.querySelector('#custom-terms')`));
+  check('la pestaña de trabajo resume los ajustes y enlaza a Ajustes', await ev(`/Se ocultan \\d+ tipos/.test(document.querySelector('[data-settings-summary]')?.innerText||'') && /Cambiar en Ajustes/.test(document.querySelector('[data-settings-summary]')?.innerText||'')`));
 
   const medir = () => ev(`JSON.stringify((()=>{
     const pick=(sel)=>{const t=document.querySelector(sel);if(!t)return null;return {ph:(t.placeholder||'').slice(0,28),rows:t.rows,alturaPx:Math.round(t.getBoundingClientRect().height),lineas:Math.round(t.getBoundingClientRect().height/parseFloat(getComputedStyle(t).lineHeight||'20'))}};
     return {terminos:pick('#custom-terms'),whitelist:pick('#whitelist'),pegado:pick('#input-text')};
   })())`);
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ajustes$/.test(x.innerText))?.click()`); await sleep(800);
   const antes = JSON.parse(await medir());
   console.log('medidas de los textareas:', JSON.stringify(antes));
   const { terminos, pegado } = antes;
@@ -58,8 +63,10 @@ async function main() {
   check('Términos personalizados crece al pegar 10 líneas (>=9 líneas visibles)', despues.terminos && despues.terminos.alturaPx > terminos.alturaPx + 60 && despues.terminos.lineas >= 9,
     despues.terminos ? terminos.alturaPx + 'px -> ' + despues.terminos.alturaPx + 'px (~' + despues.terminos.lineas + ' lineas)' : '');
   await setValue('#custom-terms', ''); await sleep(300);
-  check('Texto a anonimizar tiene 12 filas', pegado && pegado.rows === 12, pegado ? 'rows=' + pegado.rows + ' alto=' + pegado.alturaPx + 'px' : 'no encontrado');
-  check('Texto a anonimizar es alto (>250px)', pegado && pegado.alturaPx > 250, pegado ? pegado.alturaPx + 'px' : '');
+  await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`); await sleep(800);
+  const pegadoAhora = JSON.parse(await medir()).pegado;
+  check('Texto a anonimizar tiene 12 filas', pegadoAhora && pegadoAhora.rows === 12, pegadoAhora ? 'rows=' + pegadoAhora.rows + ' alto=' + pegadoAhora.alturaPx + 'px' : 'no encontrado');
+  check('Texto a anonimizar es alto (>250px)', pegadoAhora && pegadoAhora.alturaPx > 250, pegadoAhora ? pegadoAhora.alturaPx + 'px' : '');
 
   // --- ventana emergente de plantillas ---
   const scrollAntes = await ev('window.scrollY');
