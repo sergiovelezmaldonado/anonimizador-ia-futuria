@@ -4,6 +4,10 @@
 # nadie auditó).
 vendor/** -text
 *.min.js -text
+# index.html es la FUENTE cuyo hash firma el paquete y la suite: si git
+# normaliza sus finales de línea, el clon del alojamiento construye un
+# artefacto con otra huella que la verificada y `verify:site` falla.
+index.html -text
 *.png binary
 *.pdf binary
 *.docx binary
@@ -13,6 +17,6 @@ vendor/** -text
 *.js text eol=lf
 *.json text eol=lf
 *.md text eol=lf
-*.html text eol=lf
+
 .gitignore text eol=lf
 .gitattributes text eol=lf

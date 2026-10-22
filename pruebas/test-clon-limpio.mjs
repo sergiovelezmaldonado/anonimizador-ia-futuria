@@ -63,3 +63,23 @@ test('git entrega el bundle con los bytes exactos cuyo hash se verifica', () => 
   const attrs = readFileSync(path.join(root, '.gitattributes'), 'utf8');
   assert.match(attrs, /vendor\/\*\*\s+-text/, '.gitattributes debe marcar vendor/** como binario');
 });
+
+test('git guarda index.html con los bytes exactos que se verifican', () => {
+  // Un .gitattributes que normalice los finales de línea de la fuente hace que
+  // el clon del alojamiento construya un artefacto con OTRA huella que la
+  // aprobada, y `git status` no avisa de nada.
+  const enDisco = createHash('sha256').update(readFileSync(path.join(root, 'index.html'))).digest('hex');
+  const enGit = execFileSync('git', ['show', 'HEAD:index.html'], { cwd: root, maxBuffer: 1 << 28 });
+  assert.equal(createHash('sha256').update(enGit).digest('hex'), enDisco,
+    'git guarda index.html con otros bytes: el clon construiría una huella distinta de la verificada (revisa .gitattributes)');
+});
+
+test('la huella del paquete corresponde a la fuente versionada', () => {
+  // Cierra el círculo: lo que firma el manifiesto debe ser lo que hay en git.
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(path.join(root, 'dist/build-manifest.json'), 'utf8')); }
+  catch { return; } // sin dist/ construido no hay nada que comparar
+  const enGit = execFileSync('git', ['show', 'HEAD:index.html'], { cwd: root, maxBuffer: 1 << 28 });
+  assert.equal(manifest.inputs['index.html'], createHash('sha256').update(enGit).digest('hex'),
+    'el paquete se construyó desde una fuente distinta de la versionada: reconstruye tras commitear');
+});
