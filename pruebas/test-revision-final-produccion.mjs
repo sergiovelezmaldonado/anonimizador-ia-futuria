@@ -496,3 +496,22 @@ test('la valoración de la auditoría cita las versiones reales del paquete', ()
   }
   assert.match(valoracion, /runtimePackages|embeddedInventory|runtime\[/, 'las versiones deben derivarse del manifiesto');
 });
+
+test('el alojamiento sirve la misma CSP que el servidor verificado', () => {
+  // El paquete protege con CSP, pero quien la envía en producción es el
+  // alojamiento: sin esta cabecera el sitio público queda sin la defensa.
+  const vercel = JSON.parse(fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(new URL('../dist/build-manifest.json', import.meta.url), 'utf8'));
+  const headers = vercel.headers.flatMap(rule => rule.headers);
+  const csp = headers.find(h => h.key === 'Content-Security-Policy');
+  assert.ok(csp, 'el alojamiento no envía Content-Security-Policy');
+  // Debe coincidir con la CSP del paquete, más frame-ancestors coherente con DENY.
+  assert.ok(csp.value.startsWith(manifest.security.csp), 'la CSP del alojamiento difiere de la verificada');
+  assert.match(csp.value, /frame-ancestors 'none'/);
+  assert.ok(!csp.value.includes('unsafe-eval'));
+  const frame = headers.find(h => h.key === 'X-Frame-Options');
+  assert.equal(frame.value, 'DENY', 'X-Frame-Options debe concordar con frame-ancestors none');
+  // Y el despliegue debe publicar el paquete, no el repositorio.
+  assert.equal(vercel.outputDirectory, 'dist');
+  assert.match(vercel.buildCommand, /npm run build/);
+});
