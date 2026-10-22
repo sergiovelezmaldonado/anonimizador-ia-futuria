@@ -20,7 +20,7 @@ async function resetBrowserTabs() {
 const runs = [];
 const commands = [
   ['motor, revisión y servidores', ['--test', '--test-reporter=tap', 'pruebas/test-seguridad.mjs', 'pruebas/test-fase0-motor.mjs', 'pruebas/test-servidor.mjs', 'pruebas/test-correcciones-ui.mjs', 'pruebas/test-servidor-aislado.mjs', 'pruebas/test-document-edits.mjs',
- 'pruebas/test-revision-final-produccion.mjs', 'pruebas/test-document-model.mjs', 'pruebas/test-document-export.mjs', 'pruebas/test-cargas-y-limites-produccion.mjs', 'pruebas/test-mensajes-produccion.mjs']],
+ 'pruebas/test-revision-final-produccion.mjs', 'pruebas/test-document-model.mjs', 'pruebas/test-document-export.mjs', 'pruebas/test-cargas-y-limites-produccion.mjs', 'pruebas/test-mensajes-produccion.mjs', 'pruebas/test-clon-limpio.mjs']],
   ['regresión general', ['pruebas/sonda-app.mjs']],
   ['Fase 0: flujo, diálogos, popovers, móvil', ['pruebas/sonda-fase0.mjs']],
   ['extracción y límites', ['pruebas/sonda-correccion.mjs']],
