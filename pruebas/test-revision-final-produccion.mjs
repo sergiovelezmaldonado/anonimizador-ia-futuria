@@ -515,3 +515,46 @@ test('el alojamiento sirve la misma CSP que el servidor verificado', () => {
   assert.equal(vercel.outputDirectory, 'dist');
   assert.match(vercel.buildCommand, /npm run build/);
 });
+
+test('ningún icono de categoría usa un emoji que la fuente no dibuja', () => {
+  // 🪪 (U+1FAA9, Emoji 14) no existe en las fuentes de sistema de Windows ni
+  // Android antiguos: sale un cuadro vacío junto al dato procesado, que es
+  // justo donde el usuario necesita confiar en el resultado.
+  const sinSoporteAmplio = ['\u{1FAA9}', '\u{1FAE0}', '\u{1FAE1}', '\u{1FAE2}', '\u{1FAE3}',
+    '\u{1FAE4}', '\u{1FAE5}', '\u{1FAE6}', '\u{1FAE7}', '\u{1FAA8}', '\u{1FAAA}', '\u{1FAAB}',
+    '\u{1FAAC}', '\u{1FAAD}', '\u{1FAAE}', '\u{1FAAF}'];
+  const iconos = [...html.matchAll(/icon:\s*'([^']+)'/g)].map(m => m[1]);
+  assert.ok(iconos.length >= 10, 'no se encontraron los iconos de categoría');
+  for (const icono of iconos) {
+    for (const ch of sinSoporteAmplio) {
+      assert.ok(!icono.includes(ch), 'icono sin soporte de fuente: ' + JSON.stringify(icono));
+    }
+  }
+});
+
+test('la tabla de equivalencias no parte palabras por la mitad', () => {
+  // break-all corta dentro de la palabra: una IP sale como «192.16 / 8.1.44»,
+  // que parece un dato corrupto en lugar de un salto de línea.
+  const tabla = html.slice(html.indexOf('>Dato original<'), html.indexOf('</table>', html.indexOf('>Dato original<')));
+  assert.ok(tabla.length > 100, 'no se localizó la tabla de equivalencias');
+  assert.ok(!/break-all/.test(tabla), 'la tabla usa break-all y parte palabras');
+  assert.match(tabla, /break-words|anywhere/, 'la tabla debe permitir quebrar solo cuando no cabe');
+});
+
+test('los controles de vista del resultado se ven pulsables', () => {
+  // Eran dos líneas en negrita sin borde ni fondo: se leían como subtítulos.
+  for (const etiqueta of ['Ver original y resultado', 'Ver como documento']) {
+    const at = html.indexOf(etiqueta);
+    assert.ok(at > 0, 'no se encontró el control ' + etiqueta);
+    const apertura = html.lastIndexOf('<button', at);
+    const clases = html.slice(apertura, at);
+    assert.match(clases, /border/, etiqueta + ' no tiene borde visible');
+  }
+});
+
+test('la barra de pestañas no deja secciones invisibles en móvil', () => {
+  // A 360 px solo caben 2 de 5 pestañas y la pista era un texto gris de 12 px.
+  // Debe haber un control explícito (menú) para alcanzar las demás.
+  const bar = html.slice(html.indexOf('role="tablist"') - 400, html.indexOf('role="tablist"') + 2600);
+  assert.match(bar, /aria-label="[^"]*secciones|data-tab-menu/, 'no hay control accesible para las secciones ocultas');
+});

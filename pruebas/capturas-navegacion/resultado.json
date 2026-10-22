@@ -20,7 +20,11 @@
     "ok": true
   },
   {
-    "name": "ayuda para descubrir la barra móvil 360",
+    "name": "acceso visible a todas las secciones en 360",
+    "ok": true
+  },
+  {
+    "name": "el menú lista las cinco secciones en 360",
     "ok": true
   },
   {
@@ -44,7 +48,11 @@
     "ok": true
   },
   {
-    "name": "ayuda para descubrir la barra móvil 390",
+    "name": "acceso visible a todas las secciones en 390",
+    "ok": true
+  },
+  {
+    "name": "el menú lista las cinco secciones en 390",
     "ok": true
   },
   {

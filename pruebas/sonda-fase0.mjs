@@ -9,7 +9,7 @@ ws.addEventListener('message', ev => { const m = JSON.parse(ev.data); if (m.id &
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const ev = async expr => { const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'eval'); return r.result.result.value; };
 const pause = ms => new Promise(r => setTimeout(r, ms));
-const click = async txt => ev(`(()=>{const b=[...document.querySelectorAll('button')].filter(b=>!b.closest('[hidden]')).find(b=>b.textContent.trim().startsWith(${JSON.stringify(txt)}));if(!b)return false;b.click();return true})()`);
+const click = async txt => ev(`(()=>{const b=[...document.querySelectorAll('button')].filter(b=>!b.closest('[hidden]')).find(b=>b.textContent.replace(/^[^\\p{L}\\p{N}]+/u,'').replace(/\\s+/g,' ').trim().startsWith(${JSON.stringify(txt.replace(/^[^\p{L}\p{N}]+/u,'').replace(/\s+/g,' ').trim())}));if(!b)return false;b.click();return true})()`);
 let ok = 0, fail = 0; const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log((cond ? '✔ ' : '✖ ') + name + (cond ? '' : '  ' + extra)); };
 await send('Runtime.enable'); await send('Page.enable');
 await send('Page.navigate', { url: 'http://localhost:5199/?t=' + Date.now() });
