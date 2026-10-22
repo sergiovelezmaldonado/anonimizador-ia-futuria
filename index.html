@@ -2816,6 +2816,8 @@ function SettingsTab({ settings, onDone }) {
   const [status, setStatus] = useState('');
   const announce = message => { setStatus(''); setTimeout(() => setStatus(message), 30); };
   const active = settings.cats.filter(c => c.on).length;
+  const hiddenWords = settings.customTerms.split('\n').filter(t => t.trim()).length;
+  const visibleWords = settings.whitelist.split('\n').filter(t => t.trim()).length;
   return (
     <div className="space-y-6">
       <LiveStatus message={status} />
@@ -2831,7 +2833,7 @@ function SettingsTab({ settings, onDone }) {
       </section>
       <CategoryPanel cats={settings.cats} onToggle={settings.toggleCat} onPreset={p => { settings.applyPreset(p); announce('Selección aplicada: ' + p.label); }}
         customTerms={settings.customTerms} onCustomTerms={settings.updateCustomTerms} whitelist={settings.whitelist} onWhitelist={settings.updateWhitelist} />
-      <p className="text-xs text-[#6b6b6b]">Ahora mismo: {active} tipos activos{settings.customTerms.trim() ? ', ' + settings.customTerms.trim().split('\n').filter(Boolean).length + ' palabras que siempre se ocultan' : ''}{settings.whitelist.trim() ? ', ' + settings.whitelist.trim().split('\n').filter(Boolean).length + ' que quedan visibles' : ''}.</p>
+      <p className="text-xs text-[#6b6b6b]" data-settings-counts>Ahora mismo: {active} {active === 1 ? 'tipo activo' : 'tipos activos'}{hiddenWords ? ', ' + hiddenWords + (hiddenWords === 1 ? ' palabra que siempre se oculta' : ' palabras que siempre se ocultan') : ''}{visibleWords ? ', ' + visibleWords + (visibleWords === 1 ? ' palabra que queda visible' : ' palabras que quedan visibles') : ''}.</p>
     </div>
   );
 }
