@@ -19,8 +19,8 @@ check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`/Cómo us
 check('«Empezar ahora» lleva a la vista de trabajo', await click('Empezar ahora')); await pause(300);
 check('vista de trabajo visible', await ev(`!!document.querySelector('#input-text')`));
 check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===5`));
-const pickExample = async () => { const ok = await click('Elegir un ejemplo'); await pause(900); await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');const b=d&&d.querySelector('.grid button');b&&b.click();})()`); await pause(700); await click('Ocultar datos sensibles'); await pause(600); return ok; };
-check('botón Elegir un ejemplo abre la ventana y procesa', await pickExample());
+const pickExample = async () => { const ok = await click('Cargar un ejemplo'); await pause(900); await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');const b=d&&d.querySelector('.grid button');b&&b.click();})()`); await pause(700); await click('Ocultar datos sensibles'); await pause(600); return ok; };
+check('botón Cargar un ejemplo abre la ventana y procesa', await pickExample());
 check('resultado con etiquetas', await ev(`(document.body.innerText.match(/\\[[A-Z_]+_\\d+\\]/g)||[]).length>=6`));
 check('semáforo no bloquea el ejemplo (categorías inactivas solo avisan)', await ev(`!document.querySelector('input[data-review]').disabled`));
 check('aviso de tipos desactivados visible, sin jerga', await ev(`/Quedan posibles .* sin ocultar/i.test(document.body.innerText) && !/seudonimiz|heur[ií]stic/i.test(document.querySelector('[role=region][aria-label="Estado de revisión"]').innerText)`));
@@ -40,11 +40,12 @@ check('aria-live presente', await ev(`document.querySelectorAll('[role=status][a
 check('la pestaña de trabajo no depende de tooltips «?»', await ev(`!document.querySelector('#main button[aria-label="Más información"]')`));
 check('header sticky opaco', await ev(`getComputedStyle(document.querySelector('.sticky.top-0')).backgroundColor==='rgb(255, 255, 255)'`));
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Ajustes$/.test(b.textContent)).click()`); await pause(400);
-check('en Ajustes, campos de palabras propias visibles sin desplegar', await ev(`!!document.querySelector('#custom-terms') && !!document.querySelector('#whitelist') && document.querySelector('#custom-terms').offsetParent!==null`));
+await ev(`document.querySelector('[aria-controls="settings-words"]').click(); document.querySelector('[aria-controls="settings-types"]').click()`); await pause(200);
+check('en Ajustes, campos de palabras propias visibles al desplegar', await ev(`!!document.querySelector('#custom-terms') && !!document.querySelector('#whitelist') && document.querySelector('#custom-terms').offsetParent!==null`));
 const termsH = await ev(`document.querySelector('#custom-terms').getBoundingClientRect().height`);
 check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto=' + termsH);
 check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
-check('títulos de Ajustes explican cada bloque sin abrir nada', await ev(`/2 · Qué tipos de datos se ocultan/.test(document.body.innerText) && /3 · Oculta siempre estas palabras/.test(document.body.innerText) && /4 · Deja visibles estas palabras/.test(document.body.innerText)`));
+check('títulos de Ajustes explican cada bloque', await ev(`/Selecciona qué tipos de datos ocultar/.test(document.body.innerText) && /Personaliza palabras para anonimizar o dejar visibles/.test(document.body.innerText) && /Oculta siempre estas palabras/.test(document.body.innerText) && /Deja visibles estas palabras/.test(document.body.innerText)`));
 // Un cambio en Ajustes deja obsoleto el resultado de la pestaña de trabajo
 await ev(`[...document.querySelectorAll('#cats-body button')].find(b=>b.getAttribute('aria-pressed')==='false' && !b.disabled).click()`); await pause(200);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(400);
@@ -52,7 +53,7 @@ check('la pestaña de trabajo conserva el texto pero invalida el resultado tras 
 check('resumen de ajustes con enlace en la pestaña de trabajo', await ev(`/Cambiar en Ajustes/.test(document.querySelector('[data-settings-summary]')?.innerText||'')`));
 await click('Ocultar datos sensibles'); await pause(600);
 check('«¿Se escapó algo? Ocultar también» disponible en el resultado', await ev(`!!document.querySelector('#extra-term')`));
-check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Elegir un ejemplo/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
+check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Cargar un ejemplo/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
 check('1 · Pega tu texto sigue en la pestaña de trabajo', await ev(`/1 · Pega tu texto/.test(document.body.innerText)`));
 // diálogos propios: Limpiar no usa window.confirm
 await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
@@ -62,6 +63,7 @@ await ev(`[...document.querySelectorAll('[role=alertdialog] button')].find(b=>/B
 check('diálogo cerrado y texto borrado', await ev(`!document.querySelector('[role=alertdialog]') && document.querySelector('#input-text').value===''`));
 // «Cómo usar»: pasos en vertical, «por qué» antes del cómo, categorías y glosario plegados
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Cómo usar/.test(b.textContent)).click()`); await pause(300);
+await ev(`document.querySelector('[aria-controls="howto-steps"]').click()`); await pause(200);
 check('los 6 pasos están en una sola columna vertical', await ev(`(()=>{const li=[...document.querySelectorAll('ol li')];if(li.length!==6)return false;const xs=new Set(li.map(l=>Math.round(l.getBoundingClientRect().left)));const ys=li.map(l=>l.getBoundingClientRect().top);return xs.size===1&&ys.every((y,i)=>i===0||y>ys[i-1])})()`));
 check('«Por qué anonimizar» aparece antes de «Cómo usar»', await ev(`(()=>{const w=document.querySelector('#why-title'),h=document.querySelector('#howto-title');return w&&h&&w.getBoundingClientRect().top<h.getBoundingClientRect().top})()`));
 check('categorías y glosario plegados al llegar', await ev(`!document.querySelector('#howto-cats') && !document.querySelector('#howto-glossary')`));

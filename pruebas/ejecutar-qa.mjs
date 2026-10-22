@@ -11,6 +11,7 @@ const commands = [
   ['Fase 0: flujo, diálogos, popovers, móvil', ['pruebas/sonda-fase0.mjs']],
   ['extracción y límites', ['pruebas/sonda-correccion.mjs']],
   ['interfaz', ['pruebas/sonda-interfaz.mjs']],
+  ['organización aprobada y plegables', ['pruebas/sonda-organizacion.mjs']],
   ['Word y visor', ['pruebas/sonda-doc-y-visor.mjs']],
   ['seguridad y privacidad', ['pruebas/sonda-seguridad.mjs']],
   ['fixture PDF 12 páginas', ['pruebas/sonda-multipagina-visor.mjs']],

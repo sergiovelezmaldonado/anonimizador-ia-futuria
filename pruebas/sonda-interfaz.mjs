@@ -40,8 +40,9 @@ async function main() {
   // --- pestaña Ajustes: tipos y palabras propias viven aquí, no en la de trabajo ---
   await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ajustes$/.test(x.innerText))?.click()`);
   await sleep(800);
-  check('los campos de palabras propias están visibles sin desplegar nada', await ev(`['#custom-terms','#whitelist'].every(id=>{const t=document.querySelector(id);return t&&t.offsetParent!==null})`));
-  check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Qué tipos de datos se ocultan/.test(document.querySelector('#cats-title')?.innerText||'')`));
+  await ev(`document.querySelector('[aria-controls="settings-types"]').click();document.querySelector('[aria-controls="settings-words"]').click()`); await sleep(250);
+  check('los campos de palabras propias están visibles al desplegar su bloque', await ev(`['#custom-terms','#whitelist'].every(id=>{const t=document.querySelector(id);return t&&t.offsetParent!==null})`));
+  check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Selecciona qué tipos de datos ocultar/.test(document.querySelector('#cats-title')?.innerText||'')`));
   await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
   await sleep(800);
   check('la pestaña de trabajo no muestra el panel de tipos (sin ruido)', await ev(`!document.querySelector('#cats-title') && !document.querySelector('#custom-terms')`));
@@ -52,6 +53,7 @@ async function main() {
     return {terminos:pick('#custom-terms'),whitelist:pick('#whitelist'),pegado:pick('#input-text')};
   })())`);
   await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Ajustes$/.test(x.innerText))?.click()`); await sleep(800);
+  await ev(`document.querySelector('[aria-controls="settings-words"]').click()`); await sleep(250);
   const antes = JSON.parse(await medir());
   console.log('medidas de los textareas:', JSON.stringify(antes));
   const { terminos, pegado } = antes;
@@ -70,8 +72,8 @@ async function main() {
 
   // --- ventana emergente de plantillas ---
   const scrollAntes = await ev('window.scrollY');
-  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir un ejemplo/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
-  check('existe el boton "Elegir un ejemplo"', abrio);
+  const abrio = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Cargar un ejemplo/i.test(x.innerText));if(!b)return false;b.click();return true;})()`);
+  check('existe el boton "Cargar un ejemplo"', abrio);
   await sleep(1500);
 
   const modal = await ev(`JSON.stringify((()=>{
@@ -114,7 +116,7 @@ async function main() {
   check('se restaura el scroll del fondo', (await ev('document.body.style.overflow')) !== 'hidden', null);
 
   // seleccionar una plantilla sigue funcionando (sin texto previo no pide confirmación)
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir un ejemplo/i.test(x.innerText));b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Cargar un ejemplo/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1200);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelector('.grid button'); b&&b.click();})()`);
@@ -125,7 +127,7 @@ async function main() {
 
   // con texto previo, elegir otra plantilla pide confirmación con diálogo propio (Reemplazar)
   await ev(`window.__nativeConfirm=0;window.confirm=()=>{window.__nativeConfirm++;return true}`);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Elegir un ejemplo/i.test(x.innerText));b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Cargar un ejemplo/i.test(x.innerText));b&&b.click();})()`);
   await sleep(1000);
   await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');
     const b=d&&d.querySelectorAll('.grid button')[1]; b&&b.click();})()`);

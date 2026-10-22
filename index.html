@@ -1247,13 +1247,31 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 }
 
 // ─── Pestaña Cómo usar ────────────────────────────────────────────────────────
+function CollapsibleSection({ open, onToggle, id, title, subtitle, titleId, children }) {
+  return (
+    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm">
+      <h2 id={titleId}>
+        <button type="button" id={id + '-toggle'} onClick={onToggle} aria-expanded={open} aria-controls={id}
+          className="flex w-full items-center justify-between gap-4 rounded-[28px] px-6 py-5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+          <span className="min-w-0">
+            <span className="block text-lg font-bold text-[#222222]">{title}</span>
+            <span data-fold-description className="block mt-1 text-sm font-normal leading-relaxed text-[#6b6b6b]">{subtitle}</span>
+          </span>
+          <span className="shrink-0 text-sm font-semibold text-[#333333]">{open ? 'Ocultar ▴' : 'Ver ▾'}</span>
+        </button>
+      </h2>
+      {open ? <div id={id} role="region" aria-labelledby={id + '-toggle'} className="border-t border-[#e5e5e5] px-6 pb-6 pt-5">{children}</div> : null}
+    </section>
+  );
+}
+
 function HowToTab({ onStart }) {
   const steps = [
     { n: '1', icon: '📄', title: 'Pega o sube tu documento',
-      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, pulsa «Elegir un ejemplo»: son 50 textos con datos inventados.',
+      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, pulsa «Cargar un ejemplo» y elige uno de los 50 textos con datos inventados.',
       tip: 'Los PDF escaneados (fotos) no tienen texto que leer. Conviértelos con una herramienta de tu empresa; no los subas a un convertidor en línea.' },
     { n: '2', icon: '⚙️', title: 'Revisa los Ajustes (opcional)',
-      desc: 'En la pestaña «Ajustes» lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. Puedes añadir palabras que siempre deben ocultarse (un proyecto, un cliente) y palabras que pueden quedar visibles (tu empresa, tu ciudad). Se hace una vez por sesión.',
+      desc: 'En la pestaña «Ajustes», abre «Selecciona qué tipos de datos ocultar». Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. En «Personaliza palabras para anonimizar o dejar visibles» puedes añadir proyectos o clientes que siempre deban ocultarse, y palabras que pueden quedar visibles. Se hace una vez por sesión.',
       tip: 'Montos, direcciones, empresas y fechas se detectan por aproximación: si los activas, revisa el resultado con más cuidado.' },
     { n: '3', icon: '🔒', title: 'Pulsa «Ocultar datos sensibles» y revisa',
       desc: 'Cada dato se cambia por una etiqueta como [PERSONA_1] o [EMAIL_1]; la misma persona recibe siempre la misma etiqueta. El aviso de color te dice si queda algo por ocultar. Lee el resultado, marca «Revisé el texto…» y se activan Copiar y Descargar.',
@@ -1289,19 +1307,8 @@ function HowToTab({ onStart }) {
   ];
   const [showCats, setShowCats] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
-  const Collapsible = ({ open, onToggle, id, title, subtitle, children }) => (
-    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm">
-      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id}
-        className="flex w-full items-center justify-between gap-4 rounded-[28px] px-6 py-5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
-        <span>
-          <span className="block text-lg font-bold text-[#222222]">{title}</span>
-          <span className="block mt-0.5 text-sm text-[#6b6b6b]">{subtitle}</span>
-        </span>
-        <span className="shrink-0 text-sm font-semibold text-[#333333]">{open ? 'Ocultar ▴' : 'Ver ▾'}</span>
-      </button>
-      {open ? <div id={id} className="border-t border-[#e5e5e5] px-6 pb-6 pt-5">{children}</div> : null}
-    </section>
-  );
+  const [showSafety, setShowSafety] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
   return (
     <div className="space-y-8">
       <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] p-6" aria-labelledby="why-title">
@@ -1320,24 +1327,19 @@ function HowToTab({ onStart }) {
             </article>
           ))}
         </div>
-        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-[#e5e5e5] bg-white p-5 shadow-sm md:flex-row md:items-start">
+      </section>
+
+      <CollapsibleSection open={showSafety} onToggle={() => setShowSafety(v => !v)} id="howto-safety" title="Tu texto no sale de tu navegador" subtitle="Conoce cómo se procesa tu información y qué debes cuidar al copiar o descargar.">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start">
           <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e8f5e9] text-xl">🔐</span>
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-[#222222]">Por qué es seguro: tu texto no sale de tu navegador</h3>
             <p className="mt-1 text-sm leading-relaxed text-[#333333]">No hay ningún servidor que reciba, guarde o analice tu contenido. Todo ocurre en tu computador y se borra al cerrar la pestaña. Lo puedes comprobar: con <span className="whitespace-nowrap">F12 → pestaña Red</span> verás que no sale ninguna petición mientras anonimizas.</p>
             <p className="mt-1 text-xs text-[#555555]">Las librerías y fuentes sí se cargan desde internet al abrir la app. Las descargas y el portapapeles quedan fuera de este control.</p>
           </div>
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rounded-[28px] border border-[#e5e5e5] bg-white p-6 shadow-sm" aria-labelledby="howto-title">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 id="howto-title" className="text-xl font-bold text-[#222222]">Cómo usar el Anonimizador IA</h2>
-            <p className="mt-1 text-sm text-[#6b6b6b]">Seis pasos. Gratis, sin registro, y nada sale de tu navegador.</p>
-          </div>
-          {onStart ? <AppButton onClick={onStart}>Empezar ahora →</AppButton> : null}
-        </div>
+      <CollapsibleSection open={showSteps} onToggle={() => setShowSteps(v => !v)} id="howto-steps" titleId="howto-title" title="Cómo usar el Anonimizador IA" subtitle="Abre los seis pasos para cargar tu texto, revisarlo y restaurar los datos originales.">
         <ol className="relative space-y-0">
           {steps.map((s, i) => (
             <li key={s.n} className="relative flex gap-4 pb-8 last:pb-0">
@@ -1351,9 +1353,10 @@ function HowToTab({ onStart }) {
             </li>
           ))}
         </ol>
-      </section>
+      </CollapsibleSection>
+      {onStart ? <div><AppButton onClick={onStart}>Empezar ahora →</AppButton></div> : null}
 
-      <Collapsible open={showCats} onToggle={() => setShowCats(v => !v)} id="howto-cats" title="Qué tipos de datos detecta" subtitle={CATS.length + ' tipos. Los marcados con «Activo» vienen seleccionados al empezar.'}>
+      <CollapsibleSection open={showCats} onToggle={() => setShowCats(v => !v)} id="howto-cats" title="Qué tipos de datos detecta" subtitle={CATS.length + ' tipos. Los marcados con «Activo» vienen seleccionados al empezar.'}>
         <div className="grid gap-3 md:grid-cols-2">
           {[...CATS.filter(c => c.on), ...CATS.filter(c => !c.on), CUSTOM_CAT].map(c => (
             <div key={c.tag} className="flex items-start gap-3 rounded-2xl border border-[#e5e5e5] p-3">
@@ -1374,9 +1377,9 @@ function HowToTab({ onStart }) {
             </div>
           ))}
         </div>
-      </Collapsible>
+      </CollapsibleSection>
 
-      <Collapsible open={showGlossary} onToggle={() => setShowGlossary(v => !v)} id="howto-glossary" title="Glosario" subtitle="Las palabras que verás en la app, explicadas sin tecnicismos.">
+      <CollapsibleSection open={showGlossary} onToggle={() => setShowGlossary(v => !v)} id="howto-glossary" title="Glosario" subtitle="Las palabras que verás en la app, explicadas sin tecnicismos.">
         <dl className="grid gap-4 text-sm md:grid-cols-2">
           {glossary.map(([t, d]) => (
             <div key={t}>
@@ -1385,7 +1388,7 @@ function HowToTab({ onStart }) {
             </div>
           ))}
         </dl>
-      </Collapsible>
+      </CollapsibleSection>
     </div>
   );
 }
@@ -2720,16 +2723,18 @@ function GrowingTextarea({ value, onChange, minRows = 3, maxRows = 14, className
 }
 
 function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, whitelist, onWhitelist }) {
+  const [showTypes, setShowTypes] = useState(false);
+  const [showWords, setShowWords] = useState(false);
   const activeIds = cats.filter(c => c.on).map(c => c.id).sort().join(',');
   const activePreset = PRESETS.find(p => [...new Set([...p.cats, ...cats.filter(c => c.alwaysOn).map(c => c.id)])].sort().join(',') === activeIds);
   const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
   const ordered = [...cats.filter(c => c.on), ...cats.filter(c => !c.on)];
   return (
-    <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6 space-y-6" aria-labelledby="cats-title">
+    <div className="space-y-4">
+      <CollapsibleSection open={showTypes} onToggle={() => setShowTypes(v => !v)} id="settings-types" titleId="cats-title" title="Selecciona qué tipos de datos ocultar" subtitle="Marca nombres, teléfonos, correos, identificaciones y otros datos para sustituirlos por etiquetas. Puedes mantener la selección recomendada o adaptarla a tu documento.">
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 id="cats-title" className="font-bold text-[#222222]"><span className="text-[#6b6b6b]">2 ·</span> Qué tipos de datos se ocultan</h2>
             <p className="mt-1 text-sm text-[#6b6b6b]">Los habituales ya están marcados. Marca o desmarca los que necesites.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Conjuntos predefinidos">
@@ -2762,22 +2767,25 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
           ))}
         </div>
       </div>
+      </CollapsibleSection>
+      <CollapsibleSection open={showWords} onToggle={() => setShowWords(v => !v)} id="settings-words" title="Personaliza palabras para anonimizar o dejar visibles" subtitle="Escribe nombres, proyectos o códigos que siempre deben ocultarse, y palabras que pueden quedar visibles. Encontrarás dos campos separados, con ejemplos y un término por línea.">
       <div className="grid gap-5 md:grid-cols-2">
         <div>
-          <label htmlFor="custom-terms" className="block font-bold text-[#222222]"><span className="text-[#6b6b6b]">3 ·</span> Oculta siempre estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
+          <label htmlFor="custom-terms" className="block font-bold text-[#222222]">Oculta siempre estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
           <p id="custom-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Nombres, proyectos o códigos que la app no detecta sola. Uno por línea.</p>
           <GrowingTextarea id="custom-terms" className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
             placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ"} aria-describedby="custom-help" />
         </div>
         <div>
-          <label htmlFor="whitelist" className="block font-bold text-[#222222]"><span className="text-[#6b6b6b]">4 ·</span> Deja visibles estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
+          <label htmlFor="whitelist" className="block font-bold text-[#222222]">Deja visibles estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
           <p id="whitelist-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Lo que la IA sí puede ver: tu empresa, tu ciudad, un correo público. Uno por línea.</p>
           <GrowingTextarea id="whitelist" className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
             placeholder={"Mi Empresa S.A.\nventas@miempresa.com\nBogotá"} aria-describedby="whitelist-help" />
           <p className="mt-1.5 text-xs text-[#6b6b6b]">También puedes tocar una etiqueta del resultado y elegir «dejar visible».</p>
         </div>
       </div>
-    </section>
+      </CollapsibleSection>
+    </div>
   );
 }
 
@@ -2814,9 +2822,9 @@ function SettingsTab({ settings, onDone }) {
       <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] px-6 py-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 max-w-2xl">
-            <h2 className="text-xl font-bold text-[#222222]">Ajustes: qué se oculta y qué no</h2>
-            <p className="mt-1 text-sm text-[#444444]">Se configura una vez y vale para todos los textos de esta sesión. Lo habitual ya viene marcado; si no tienes nada especial, puedes pasar directo a «Anonimizar texto».</p>
-            <p className="mt-1 text-xs text-[#6b6b6b]">Los ajustes se mantienen mientras esta pestaña del navegador siga abierta.</p>
+            <h2 className="text-xl font-bold text-[#222222]">Decide qué información quieres ocultar</h2>
+            <p className="mt-1 text-sm text-[#444444]">Los tipos habituales ya vienen seleccionados. Aquí puedes cambiarlos y añadir palabras propias de tu empresa. Si no necesitas hacer cambios, puedes ir directamente a «Anonimizar texto».</p>
+            <p className="mt-1 text-xs text-[#6b6b6b]">Los cambios se aplican al momento y se mantienen durante esta sesión; al recargar o cerrar la pestaña del navegador se pierden.</p>
           </div>
           {onDone ? <AppButton onClick={onDone}>Ir a Anonimizar texto →</AppButton> : null}
         </div>
@@ -2980,7 +2988,7 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
             <p className="mt-1 text-sm text-[#444444]">Cambiamos nombres, teléfonos, cuentas y claves por etiquetas. Luego los recuperas. Nada sale de tu navegador.</p>
             <p className="mt-1 text-xs text-[#6b6b6b]">Prueba primero con un ejemplo: 50 textos con datos inventados, por área.</p>
           </div>
-          <AppButton variant="secondary" className="border-[#222222]" onClick={() => setShowTemplates(true)} disabled={uploading}>Elegir un ejemplo</AppButton>
+          <AppButton variant="secondary" className="border-[#222222]" onClick={() => setShowTemplates(true)} disabled={uploading}>Cargar un ejemplo</AppButton>
         </div>
       </section>
 
