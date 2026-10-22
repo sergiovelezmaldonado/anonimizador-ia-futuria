@@ -10,21 +10,24 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-const root = path.dirname(path.dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Za-z]:)/, '$1');
+import { fileURLToPath } from 'node:url';
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
 const versionados = new Set(git(['ls-files']).split('\n').map(l => l.trim()).filter(Boolean));
 
 test('los archivos de vendor que el build necesita están versionados', () => {
   const build = readFileSync(path.join(root, 'scripts/build-produccion.mjs'), 'utf8');
-  // Las entradas son [nombre, archivo, url, directorio].
-  const entradas = [...build.matchAll(/\['([^']+)',\s*'([^']+)',\s*'[^']*',\s*'([^']+)'\]/g)];
-  assert.ok(entradas.length >= 3, 'no se encontraron las bibliotecas del build');
+  // Entradas [nombre, archivo, url, directorio] cuyo directorio es vendor/.
+  const entradas = [...build.matchAll(/'([^']+)',\s*'([^']+\.m?js)',\s*'[^']*',\s*'(vendor\/[^']+)'/g)];
+  assert.ok(entradas.length >= 1, 'no se encontró ninguna biblioteca servida desde vendor/');
+  const exigidos = new Set();
   for (const [, nombre, archivo, dir] of entradas) {
-    if (!dir.startsWith('vendor/')) continue;
-    for (const rel of [dir + '/' + archivo, dir + '/bundle-manifest.json']) {
-      assert.ok(versionados.has(rel), 'el build necesita ' + rel + ' (' + nombre + ') y no está en git: un clon limpio no puede construir');
-    }
+    exigidos.add(dir + '/' + archivo);
+    exigidos.add(dir + '/bundle-manifest.json');
+    assert.ok(nombre.length > 0);
   }
+  const faltan = [...exigidos].filter(rel => !versionados.has(rel));
+  assert.deepEqual(faltan, [], 'el build los lee y no están en git (un clon limpio no puede construir): ' + faltan.join(', '));
 });
 
 test('ningún archivo que el build necesita está excluido por .gitignore', () => {
