@@ -2,8 +2,8 @@
 
 Estado: **publicada en producción.** Queda solo la prueba en dispositivos reales (ver «Pendiente»).
 
-Candidata: `index.html` sha256 **3c187f1900bf541254f968d1cbdc90dbdb2f76f9cb64165ee9a33c67dd94b13c**
-Versión **v1.0.0**, commit `7250170`, publicada en <https://anonimizador-ia-futuria.vercel.app>
+Candidata: `index.html` sha256 **c2e76b905c11872a9fc76c54fef784aaf6c6ed339713828970fca891d9ae8bf7**
+Versión **v1.0.2**, commit `669ee53`, publicada en <https://anonimizador-ia-futuria.vercel.app>
 
 ## Alcance de esta versión
 
@@ -22,10 +22,12 @@ Herramienta gratuita que procesa todo en el navegador: sustituye datos sensibles
 - [x] La restauración es exacta carácter a carácter: el troceado ya no emite fragmentos degenerados que colapsaran espacios o tabuladores.
 - [x] **Paquete de producción sin compiladores en el navegador**: `npm run build` precompila JSX y Tailwind y sirve las bibliotecas desde el propio origen con SRI; `npm run verify` comprueba bytes, hashes y lista blanca, y rechaza cualquier archivo no inventariado. 6/6.
 - [x] **Dependencias al día y auditadas**: PDF.js 4.2.67 (incluye el parche de GHSA-wgrm-67xf-hhpq) y Mammoth 1.13.0 reconstruido en este repositorio con sus transitivas parcheadas. La auditoría declara **0 avisos** en lo que se sirve al usuario, con inventario embebido exacto: incluye las dependencias ocultas dentro de bundles ya empaquetados y no declara las ausentes.
-- [x] **Suite completa sobre una única candidata: 429/429**, informe con huella coincidente, sin pruebas omitidas ni suites interrumpidas. Tres pasadas consecutivas sin fallos tras aislar las sondas del navegador.
+- [x] **Suite completa sobre una única candidata: 442/442**, informe con huella coincidente, sin pruebas omitidas ni suites interrumpidas.
+- [x] **El paquete se reconstruye igual desde un clon limpio**: `git clone` + `npm ci` + `npm run build` produce la misma huella `c2e76b9` y pasa 6/6. Con tres pruebas que lo exigen: todo archivo que el build lee está versionado, ninguno queda excluido por `.gitignore`, y los bytes que git entrega para la fuente y para el bundle tienen el hash que firma el manifiesto.
+- [x] **Revisión visual a 360 px**: emoji sin soporte de fuente que salía como cuadro vacío junto al dato procesado, datos partidos a mitad de palabra en la tabla de equivalencias, tres de cinco secciones inalcanzables sin descubrir el gesto de deslizar, dos controles que se leían como subtítulos y el `?` de validación sin explicar. Los cinco corregidos; un sexto hallazgo (cabecera que supuestamente ocupaba el 38 % de la pantalla) se descartó al medirlo: son el 20 %.
 - [x] **Recorrido real en navegador: 15/15**, con los cuatro formatos descargados y reimportados, sin una sola petición a internet y sin desbordamiento a 360 px.
 - [x] **Revisión independiente sin hallazgos bloqueantes.** Cinco rondas; cada hallazgo cerrado con pruebas de regresión que fallan si el defecto reaparece.
-- [x] Commit `7250170` y etiqueta `v1.0.0` con push verificado contra el remoto; rollback disponible a `a81cf15`.
+- [x] Commit `669ee53` y etiqueta `v1.0.2` con push verificado contra el remoto; rollback disponible a `a81cf15`.
 - [x] **Despliegue verificado con `npm run verify:site`**: los 35 archivos públicos tienen el hash exacto del paquete aprobado, sobre HTTPS, con CSP sin `unsafe-eval`, `frame-ancestors 'none'`, `nosniff`, `no-referrer`, `DENY` y sin cookies. No se sirve el repositorio, ni `package.json`, ni las pruebas, ni el código de los scripts. 60 comprobaciones, 0 fallos.
 - [x] **Recorrido real sobre el sitio público con `npm run verify:site:browser`**: React de producción sin Babel ni Tailwind CDN, oculta nombre, correo, celular y cédula, conserva acentos y emoji, restaura el original exacto, genera los cuatro formatos, sin almacenamiento en el navegador, sin desbordamiento a 1366/390/360 px, **cero peticiones a otro dominio** y sin errores de consola. 12/12.
 - [ ] Anuncio o publicación en Substack: pendiente de decisión, el sitio ya está comprobado.
