@@ -45,9 +45,10 @@ function hooks(initial = []) {
   };
 }
 function context(h, extra = {}) {
-  const ctx = vm.createContext({ React:h, useState:h.useState.bind(h), useRef:h.useRef.bind(h), useMemo:h.useMemo.bind(h), Intl,
+  const ctx = vm.createContext({ React:h, useState:h.useState.bind(h), useRef:h.useRef.bind(h), useMemo:h.useMemo.bind(h), useEffect:h.useEffect.bind(h), Intl,
     window:{confirm:()=>true, addEventListener(){}, removeEventListener(){}}, setTimeout:()=>{}, useDialog:()=>h.dialogs, ...extra });
   vm.runInContext(engine, ctx);
+  vm.runInContext(slice('// ─── Modelo de documentos textuales', '// ─── Fin modelo de documentos textuales'), ctx);
   return ctx;
 }
 // Índices de estado de WorkTab, en orden de declaración (los ajustes viven en App y llegan por props).
@@ -217,4 +218,26 @@ test('ninguna pestaña usa alert/confirm nativos (solo el fallback documentado d
   const ui = html.slice(html.indexOf('// ─── Componentes UI base'));
   const natives = (ui.match(/^.*(?<![\w.])(?:window\.)?(?:alert|confirm)\(.*$/gm) || []).filter(line => !/Promise\.resolve\(window\.confirm\(/.test(line));
   assert.deepEqual(natives, [], natives.join('\n'));
+});
+
+test('descarga pendiente se cancela si se desmonta el resultado por edición o ajustes', async () => {
+  const h=hooks(); let finish, saved=0;
+  const gate=new Promise(r=>finish=r);
+  const ctx=context(h,{ saveTextDocument:async (_model,_format,_kind,options)=>{await gate;if(options.canSave())saved++;} });
+  vm.runInContext(componentLogic('TextDocumentDownload','function useSettings()', '{download}'),ctx);
+  h.begin(); const api=ctx.TextDocumentDownload({model:{text:'[EMAIL_1]',blocks:[]},enabled:true});h.commit();
+  const job=api.download();h.dispose();finish();await job;
+  assert.equal(saved,0,'un resultado desmontado no puede descargarse');
+});
+test('la lectura de un archivo suspende exportación sin destruir el resultado anterior', async () => {
+  const h=hooks();let finish;
+  const gate=new Promise(r=>finish=r);
+  const ctx=context(h);ctx.readTextDocumentFile=()=>gate;
+  h.slots[W.inputText]='Sin datos sensibles';h.slots[W.result]={out:'Sin datos sensibles',reps:[]};h.slots[W.reviewed]=true;
+  vm.runInContext(componentLogic('WorkTab','// ─── Pestaña Recuperar','{handleFile,canExport}'),ctx);
+  h.begin();let api=mount(ctx,h);assert.equal(api.canExport,true);
+  const job=api.handleFile({name:'nuevo.txt'});h.begin();api=mount(ctx,h);
+  assert.equal(api.canExport,false,'exportación se suspende mientras se lee otro archivo');
+  finish(ctx.makeTextDocument('Texto nuevo'));await job;
+  assert.equal(h.slots[W.result],null,'la carga correcta invalida el resultado anterior');
 });

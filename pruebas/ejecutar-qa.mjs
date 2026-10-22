@@ -4,20 +4,44 @@ import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const CDP = process.env.FUTURIA_CDP || 'http://127.0.0.1:9334';
+// Deja el navegador con una sola pestaña en blanco. Sin esto, cada sonda
+// arranca sobre el estado que dejó la anterior y los fallos son intermitentes.
+async function resetBrowserTabs() {
+  try {
+    const list = await (await fetch(CDP + '/json/list')).json();
+    const pages = list.filter(t => t.type === 'page');
+    const fresh = await (await fetch(CDP + '/json/new?about:blank', { method: 'PUT' })).json();
+    for (const page of pages) {
+      if (page.id !== fresh.id) await fetch(CDP + '/json/close/' + page.id);
+    }
+  } catch { /* sin navegador la propia sonda informará del fallo */ }
+}
 const runs = [];
 const commands = [
-  ['motor, revisión y servidores', ['--test', '--test-reporter=tap', 'pruebas/test-seguridad.mjs', 'pruebas/test-fase0-motor.mjs', 'pruebas/test-servidor.mjs', 'pruebas/test-correcciones-ui.mjs', 'pruebas/test-servidor-aislado.mjs', 'pruebas/test-document-edits.mjs']],
+  ['motor, revisión y servidores', ['--test', '--test-reporter=tap', 'pruebas/test-seguridad.mjs', 'pruebas/test-fase0-motor.mjs', 'pruebas/test-servidor.mjs', 'pruebas/test-correcciones-ui.mjs', 'pruebas/test-servidor-aislado.mjs', 'pruebas/test-document-edits.mjs',
+ 'pruebas/test-revision-final-produccion.mjs', 'pruebas/test-document-model.mjs', 'pruebas/test-document-export.mjs', 'pruebas/test-cargas-y-limites-produccion.mjs', 'pruebas/test-mensajes-produccion.mjs']],
   ['regresión general', ['pruebas/sonda-app.mjs']],
   ['Fase 0: flujo, diálogos, popovers, móvil', ['pruebas/sonda-fase0.mjs']],
   ['extracción y límites', ['pruebas/sonda-correccion.mjs']],
   ['interfaz', ['pruebas/sonda-interfaz.mjs']],
   ['organización aprobada y plegables', ['pruebas/sonda-organizacion.mjs']],
+  ['cabeceras de apertura: escritorio y móvil', ['pruebas/sonda-cabeceras.mjs']],
+  ['aviso de guardado y memoria de sesión', ['pruebas/sonda-nota-sesion.mjs']],
+  ['navegación móvil y pestaña activa completa', ['pruebas/sonda-navegacion-produccion.mjs']],
   ['Word y visor', ['pruebas/sonda-doc-y-visor.mjs']],
   ['seguridad y privacidad', ['pruebas/sonda-seguridad.mjs']],
   ['fixture PDF 12 páginas', ['pruebas/sonda-multipagina-visor.mjs']],
+  ['documentos: controles y alcance', ['pruebas/sonda-documentos.mjs']],
+  ['documentos: archivos reales y 200 páginas', ['pruebas/sonda-documentos-e2e.mjs', '--large']],
 ];
 for (const [name, args] of commands) {
-  const result = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', timeout: 120000 });
+  // Las sondas CDP comparten la misma pestaña del navegador: sin limpiarla,
+  // una sonda hereda el estado que dejó la anterior (pestaña activa, texto
+  // cargado, diálogos abiertos) y falla de forma intermitente aunque la app
+  // esté bien. Se deja una única pestaña en blanco antes de cada sonda.
+  if (args[0].startsWith('pruebas/sonda-')) await resetBrowserTabs();
+  const result = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', timeout: 240000, env: { ...process.env, FUTURIA_REQUIRE_DOCUMENT_DEPS: '1' } });
   const output = (result.stdout || '') + (result.stderr || '');
   let total = 0, passed = 0;
   if (name === 'motor, revisión y servidores') {

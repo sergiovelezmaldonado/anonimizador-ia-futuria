@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-22T19:03:07.419Z",
+  "appSha256": "3c187f1900bf541254f968d1cbdc90dbdb2f76f9cb64165ee9a33c67dd94b13c",
+  "checks": [
+    {
+      "name": "Anonimizar texto aviso visible 1366",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto explica pérdida al recargar/cerrar 1366",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto indica qué guardar y cómo cuidar la llave 1366",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto distingue descargas y portapapeles 1366",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto sin recorte/desborde 1366",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales aviso visible 1366",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales explica pérdida al recargar/cerrar 1366",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales indica qué guardar y cómo cuidar la llave 1366",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales distingue descargas y portapapeles 1366",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales sin recorte/desborde 1366",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto aviso visible 360",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto explica pérdida al recargar/cerrar 360",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto indica qué guardar y cómo cuidar la llave 360",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto distingue descargas y portapapeles 360",
+      "ok": true
+    },
+    {
+      "name": "Anonimizar texto sin recorte/desborde 360",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales aviso visible 360",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales explica pérdida al recargar/cerrar 360",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales indica qué guardar y cómo cuidar la llave 360",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales distingue descargas y portapapeles 360",
+      "ok": true
+    },
+    {
+      "name": "Restaurar datos originales sin recorte/desborde 360",
+      "ok": true
+    },
+    {
+      "name": "texto temporal sobrevive al cambio de pestañas",
+      "ok": true
+    },
+    {
+      "name": "recargar inicia sin el texto anterior",
+      "ok": true
+    },
+    {
+      "name": "sin persistencia en almacenamiento web",
+      "ok": true
+    },
+    {
+      "name": "sin excepciones runtime",
+      "ok": true
+    }
+  ],
+  "total": 24,
+  "passed": 24
+}

@@ -5,3 +5,10 @@ node_modules/
 pruebas/resultado-seguridad.json
 pruebas/medicion-nombres.json
 pruebas/medir-hueco-nombres.mjs
+pruebas/resultado-documentos.json
+__pycache__/
+# Artefactos generados: el paquete se reconstruye con npm run build y se
+# verifica con npm run verify, así que no se versiona.
+dist/
+scripts/reports/
+vendor/mammoth-browser/mammoth.browser.min.js

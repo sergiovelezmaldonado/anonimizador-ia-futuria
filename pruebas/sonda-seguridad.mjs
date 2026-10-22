@@ -56,7 +56,8 @@ try {
   await ev(`${REVIEW}.click()`); await pause(150);
   check('copiar se habilita solo tras revisión', await ev(`([...document.querySelectorAll('button')].find(b=>b.textContent.includes('Copiar para pegar en la IA'))||{}).disabled===false`));
   await ev(`window.__blobs=[];window.__savedNames=[];const original=URL.createObjectURL.bind(URL);URL.createObjectURL=b=>{window.__blobs.push(b);return original(b)};HTMLAnchorElement.prototype.click=function(){window.__savedNames.push(this.download)};`);
-  await click('Descargar .txt'); await pause(200);
+  await ev(`(()=>{const s=document.querySelector('[data-document-download="anonymized"] select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(s,'txt');s.dispatchEvent(new Event('change',{bubbles:true}));})()`); await pause(100);
+  await click('Descargar documento'); await pause(200);
   const txt = await ev('window.__blobs[0].text()');
   check('descarga normal sin mapa ni originales', !!txt && !txt.includes('María García') && !txt.includes('maria@ejemplo.test') && txt.includes('[EMAIL_'));
   check('descarga normal es TXT', await ev('window.__savedNames[0].endsWith(".txt")'));

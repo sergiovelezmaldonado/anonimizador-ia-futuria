@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "package": "mammoth",
+  "version": "1.13.0",
+  "builtWith": {
+    "browserify": "17.0.1",
+    "uglify-js": "3.19.3",
+    "node": "v26.7.0"
+  },
+  "file": "mammoth.browser.min.js",
+  "bytes": 328309,
+  "sha256": "4d55cc05bfbc1a10f13456e3c62b6eef3b5bdb713511ae2c79de0f71225093b9",
+  "integrity": "sha384-eKfGiPuA1IWubBtBqCXAfQAa7UR73yLm6mnvtEB0xyJyiBfxMI1g/CRLZpSAlySj",
+  "embeddedPackages": {
+    "underscore": [
+      "1.13.8"
+    ],
+    "process": [
+      "0.11.10"
+    ],
+    "base64-js": [
+      "1.5.1"
+    ],
+    "ieee754": [
+      "1.2.1"
+    ],
+    "buffer": [
+      "5.2.1"
+    ],
+    "mammoth": [
+      "1.13.0"
+    ],
+    "lop": [
+      "0.4.2"
+    ],
+    "dingbat-to-unicode": [
+      "1.0.2"
+    ],
+    "option": [
+      "0.2.4"
+    ],
+    "timers-browserify": [
+      "1.4.2"
+    ],
+    "jszip": [
+      "3.10.2"
+    ],
+    "xmlbuilder": [
+      "10.1.1"
+    ],
+    "@xmldom/xmldom": [
+      "0.8.15"
+    ],
+    "lie": [
+      "3.3.0"
+    ],
+    "immediate": [
+      "3.0.6"
+    ],
+    "pako": [
+      "1.0.11"
+    ],
+    "setimmediate": [
+      "1.0.5"
+    ]
+  },
+  "prepackagedSources": {
+    "jszip": {
+      "files": [
+        "dist/jszip.min.js"
+      ],
+      "hiddenPackages": [
+        "immediate",
+        "lie",
+        "pako",
+        "setimmediate"
+      ]
+    }
+  },
+  "includedFiles": 92,
+  "note": "Bundle propio: sustituye el mammoth.browser.min.js publicado, que viene con transitivas antiguas. El inventario lista los paquetes cuyos archivos entraron al bundle MÁS las dependencias que viajan dentro de bundles ya empaquetados (ver prepackagedSources: jszip entra minificado y sus dependencias no son visibles por archivo). Los paquetes que solo usa la CLI de Node (argparse, sprintf-js) no se incluyen porque no entran al bundle. Regenerar con npm run build:mammoth tras cambiar mammoth o sus dependencias."
+}

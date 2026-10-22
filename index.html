@@ -16,9 +16,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
   <!-- pdf.js para extracción de PDFs (lazy-loaded) -->
   <script>
-    window.PDFJS_CDN = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js';
-    window.PDFJS_WORKER = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-    window.MAMMOTH_CDN = 'https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js';
+    window.PDFJS_CDN = 'https://unpkg.com/pdfjs-dist@4.2.67/legacy/build/pdf.min.mjs';
+    window.PDFJS_WORKER = 'https://unpkg.com/pdfjs-dist@4.2.67/legacy/build/pdf.worker.min.mjs';
+    window.MAMMOTH_CDN = 'https://unpkg.com/mammoth@1.13.0/mammoth.browser.min.js';
+    // SRI del archivo publicado, que es el que se descarga en desarrollo. El
+    // paquete de producción sirve el bundle reconstruido con sus transitivas
+    // parcheadas y lo verifica por hash contra vendor/mammoth-browser.
+    window.MAMMOTH_SRI = 'sha384-8NWE3bZDrmRI4IePMoQaEoLhAQ1MmRMJkdNgnGiHRFanTqsFKr0TmK6aSZvFJ/PO';
+    // PDF.js 4.x sólo se publica como módulo ES. El import() vive en este script
+    // clásico, que no pasa por Babel: compilado dentro del script text/babel se
+    // convertiría en require() y la carga fallaría con "require is not defined".
+    // Las rutas se resuelven contra la página, porque en el paquete este código
+    // corre desde assets/ y './assets/...' daría '/assets/assets/...'.
+    window.importPdfJsModule = function () {
+      return import(new URL(window.PDFJS_CDN, document.baseURI).href);
+    };
   </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -36,7 +48,7 @@
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useRef, useMemo } = React;
+const { useState, useRef, useMemo, useEffect } = React;
 const APP_VERSION = '1.0.0-fase0';
 
 function cn(...classes) { return classes.filter(Boolean).join(' '); }
@@ -351,6 +363,38 @@ function normalizeEntity(value) {
 function parseTermList(text) {
   return [...new Set(String(text || '').split('\n').map(t => t.trim()).filter(t => t.length >= 2))];
 }
+// Palabras autorizadas que son solo una PARTE de un dato detectado: el dato se
+// anonimiza igual (nunca se deja en claro), pero el resultado queda troceado,
+// así que conviene decírselo al usuario para que escriba el dato completo.
+function splittingWhitelistTerms(source, whitelist, activeCats) {
+  const text = String(source || '');
+  const terms = parseTermList(whitelist);
+  if (!terms.length) return [];
+  const splitting = new Set();
+  // Se mide con los MISMOS rangos que usa el motor: un término trocea cuando
+  // solapa una coincidencia sin cubrirla por completo (la negación exacta de
+  // coveredByRange). Buscar el término dentro de la coincidencia se perdería
+  // los casos en que el término la desborda por un extremo, que son los que
+  // más trocean.
+  for (const term of terms) {
+    const ranges = buildWhitelistRanges(text, term);
+    if (!ranges.length) continue;
+    for (const cat of activeCats || []) {
+      const pats = cat.id === 'person' ? getPersonPatterns(text) : cat.pats;
+      for (const p of pats) {
+        const { re, validate, requireValid } = patternOf(p);
+        re.lastIndex = 0;
+        for (const m of text.matchAll(re)) {
+          if (requireValid && !VALIDATORS[validate](m[0])) continue;
+          const start = m.index, end = start + m[0].length;
+          if (coveredByRange(ranges, start, end)) continue;
+          if (ranges.some(r => start < r.end && end > r.start)) splitting.add(term);
+        }
+      }
+    }
+  }
+  return [...splitting];
+}
 function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function buildWhitelistRanges(source, whitelist) {
   const ranges = [];
@@ -360,8 +404,11 @@ function buildWhitelistRanges(source, whitelist) {
   }
   return ranges.sort((a, b) => a.start - b.start);
 }
-function overlapsRange(ranges, start, end) {
-  return ranges.some(r => start < r.end && end > r.start);
+// Un dato solo queda visible si la palabra autorizada lo CUBRE por completo.
+// Con un solape parcial (escribir «miempresa.com» para dejar ver el dominio)
+// se anonimiza el dato entero: dejarlo en claro sería fallar en abierto.
+function coveredByRange(ranges, start, end) {
+  return ranges.some(r => start >= r.start && end <= r.end);
 }
 
 // ─── Lógica de anonimización ──────────────────────────────────────────────────
@@ -384,15 +431,36 @@ function runAnonymize(text, activeCats, customTerms, options = {}) {
         valid = VALIDATORS[validate](value);
         if (requireValid && !valid) continue;
       }
-      if (whitelistRanges.length && overlapsRange(whitelistRanges, start, end)) continue;
+      if (whitelistRanges.length && coveredByRange(whitelistRanges, start, end)) continue;
       // Buscar la primera etiqueta que puede cruzarse; conservar los extremos sensibles.
       let lo = 0, hi = protectedTags.length;
       while (lo < hi) {
         const mid = (lo + hi) >>> 1;
         if (protectedTags[mid].end <= start) lo = mid + 1; else hi = mid;
       }
+      const push = (from, to) => {
+        if (from >= to) return;
+        // Un tramo en blanco o de un solo carácter no es un dato sensible: solo
+        // ensuciaría el resultado y, al colapsar los espacios al normalizar la
+        // entidad, dos blancos distintos compartirían etiqueta y la
+        // restauración dejaría de ser exacta.
+        const fragment = source.slice(from, to);
+        if (to - from < 2 || !/\S/.test(fragment)) return;
+        candidates.push({ start: from, end: to, cat, priority: valid === true ? priority - 0.5 : priority, length: to - from, valid });
+      };
+      // Una palabra autorizada protege exactamente lo que el usuario escribió:
+      // el resto de la coincidencia SÍ se anonimiza. Descartarla entera dejaría
+      // el dato en claro (escribir solo el dominio de un correo), y anonimizarla
+      // entera borraría lo que se pidió dejar visible.
       const add = (from, to) => {
-        if (from < to) candidates.push({ start: from, end: to, cat, priority: valid === true ? priority - 0.5 : priority, length: to - from, valid });
+        let cursorAdd = from;
+        for (const range of whitelistRanges) {
+          if (range.end <= cursorAdd || range.start >= to) continue;
+          push(cursorAdd, Math.min(range.start, to));
+          cursorAdd = Math.max(cursorAdd, range.end);
+          if (cursorAdd >= to) break;
+        }
+        push(cursorAdd, to);
       };
       for (let i = lo; i < protectedTags.length && protectedTags[i].start < end; i++) {
         add(start, protectedTags[i].start);
@@ -451,7 +519,13 @@ function computeResidualRisk(text, activeIds = null, options = {}) {
   const hits = [], warnings = [];
   // Las etiquetas ya presentes no son datos originales ni se vuelven a escanear.
   let plain = String(text || '').replace(/\[[A-Z_]+_\d+\]/g, '');
-  for (const term of parseTermList(options.whitelist)) plain = plain.split(term).join('');
+  // Las palabras autorizadas NO se borran del texto: quitarlas destruiría el
+  // patrón que hay que detectar (borrar «miempresa.com» convierte un correo en
+  // «ana.torres@», que ya no parece correo, y el semáforo quedaría verde con el
+  // dato real en claro). Se escanea el texto íntegro y se descartan solo las
+  // coincidencias que una palabra autorizada cubre por completo, con la misma
+  // función que usa el motor.
+  const whitelistRanges = buildWhitelistRanges(plain, options.whitelist);
   for (const cat of CATS) {
     const patterns = cat.id === 'person' ? getPersonPatterns(plain) : cat.pats;
     const found = patterns.some(p => {
@@ -459,6 +533,7 @@ function computeResidualRisk(text, activeIds = null, options = {}) {
       re.lastIndex = 0;
       for (const m of plain.matchAll(re)) {
         if (requireValid && !VALIDATORS[validate](m[0])) continue;
+        if (whitelistRanges.length && coveredByRange(whitelistRanges, m.index, m.index + m[0].length)) continue;
         return true;
       }
       return false;
@@ -485,25 +560,95 @@ function canonicalTag(kind, num) {
 }
 function restoreTags(text, mapping) {
   const source = String(text || '');
+  const maxText = 25 * 1024 * 1024; // Unidades UTF-16; igual que el modelo documental.
+  const textLimit = () => {
+    const error = new RangeError('La restauración supera el límite de 25 Mi de unidades UTF-16. Divide el documento o revisa las equivalencias. No se restauró parcialmente.');
+    error.code = 'RESTORE_TEXT_LIMIT';
+    throw error;
+  };
   const resolved = [], unresolved = new Set(), repaired = [], edits = [];
   const seen = new Set();
-  // 1) Etiquetas exactas. 2) Variantes: espacios/guiones, minúsculas, sin corchetes, alias en inglés, espacios internos.
-  // Sin corchetes solo se acepta un tipo conocido (en cualquier caja), para no tocar identificadores normales como foo_1.
+  let cursor = 0, outputLength = 0;
   const knownKinds = [...new Set([...Object.keys(TAG_ALIASES), ...Object.values(TAG_ALIASES), 'PERSONA', 'EMAIL', 'URL', 'IP', 'CREDENCIAL', 'CUENTA', 'ID_FISCAL', 'TELEFONO', 'MONTO', 'NACIMIENTO', 'DIRECCION', 'EMPRESA', 'FECHA', 'PERSONALIZADO'])].sort((a, b) => b.length - a.length).join('|');
-  const loose = new RegExp('\\[\\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ_\\s\\-]*?)[\\s_\\-]+(\\d+)\\s*\\]|(?<![\\p{L}\\p{N}_\\[])(' + knownKinds + ')_(\\d+)(?![\\p{L}\\p{N}_\\]])', 'giu');
-  const out = source.replace(loose, (whole, kindA, numA, kindB, numB, offset) => {
-    const kind = kindA ?? kindB, num = numA ?? numB;
-    const canonical = canonicalTag(kind.trim(), num);
-    if (mapping[canonical] === undefined) {
-      if (/^\[[A-Z_]+_\d+\]$/.test(whole)) unresolved.add(whole);
-      return whole; // «[anexo 1]» o etiquetas ajenas se dejan intactas
+  // Una sola clase para tipo + separadores. Los dígitos no pertenecen a esa
+  // clase: no hay dos cuantificadores disputándose la misma cola de espacios.
+  const loose = new RegExp('\\[\\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ_\\s\\-]*)(\\d+)\\s*\\]|(?<![\\p{L}\\p{N}_\\[])(' + knownKinds + ')_(\\d+)(?![\\p{L}\\p{N}_\\]])', 'giu');
+  const separator = /[\s_\-]/u;
+  for (const match of source.matchAll(loose)) {
+    const [whole, kindA, numA, kindB, numB] = match;
+    const offset = match.index;
+    let kind = kindA ?? kindB;
+    if (kindA !== undefined) {
+      // El patrón histórico exige al menos un separador antes del número;
+      // todo el último bloque de separadores queda fuera del tipo capturado.
+      let end = kind.length;
+      while (end > 0 && separator.test(kind[end - 1])) end--;
+      if (end === kind.length) continue;
+      kind = kind.slice(0, end);
     }
-    if (!seen.has(canonical)) { seen.add(canonical); resolved.push({ tag: canonical, value: mapping[canonical] }); }
+    const canonical = canonicalTag(kind.trim(), numA ?? numB);
+    const value = mapping[canonical];
+    if (value === undefined) {
+      if (/^\[[A-Z_]+_\d+\]$/.test(whole)) unresolved.add(whole);
+      continue;
+    }
+    if (edits.length >= 250000) {
+      const error = new RangeError('La restauración supera el límite de 250000 sustituciones. Divide el documento. No se restauró parcialmente.');
+      error.code = 'RESTORE_EDIT_LIMIT';
+      throw error;
+    }
+    const replacement = String(value);
+    // Solo el prefijo definitivo: una contracción posterior no puede reducirlo.
+    // Usar source.length + deltas aquí rechazaría expansiones luego compensadas.
+    outputLength += offset - cursor + replacement.length;
+    if (outputLength > maxText) textLimit();
+    if (!seen.has(canonical)) { seen.add(canonical); resolved.push({ tag: canonical, value }); }
     if (whole !== canonical) repaired.push({ found: whole, tag: canonical });
-    edits.push({ start: offset, end: offset + whole.length, replacement: String(mapping[canonical]) });
-    return mapping[canonical];
-  });
-  return { out, resolved, unresolved: [...unresolved], repaired, edits };
+    edits.push({ start: offset, end: offset + whole.length, replacement });
+    cursor = offset + whole.length;
+  }
+  outputLength += source.length - cursor;
+  if (outputLength > maxText) textLimit();
+  // Solo se materializa la salida después de validar su tamaño completo.
+  const parts = [];
+  cursor = 0;
+  for (const edit of edits) {
+    parts.push(source.slice(cursor, edit.start), edit.replacement);
+    cursor = edit.end;
+  }
+  parts.push(source.slice(cursor));
+  return { out: parts.join(''), resolved, unresolved: [...unresolved], repaired, edits };
+}
+
+// Resaltado del texto restaurado: se construye con los intervalos exactos que
+// devuelve restoreTags, no buscando los valores en el texto. Un patrón con
+// todos los valores restaurados bloquea el hilo durante segundos con documentos
+// grandes, y por encima de ~170.000 valores V8 aborta sin excepción capturable.
+// Además marca solo lo que de verdad se sustituyó: un valor que la IA repitió
+// por su cuenta no se pinta como restaurado.
+const MAX_HIGHLIGHTED_SPANS = 2000;
+function buildRestoredSegments(out, edits, limit = MAX_HIGHLIGHTED_SPANS) {
+  const list = Array.isArray(edits) ? edits : [];
+  const total = list.length;
+  const shown = Math.min(total, Math.max(0, limit));
+  const segments = [];
+  let cursor = 0;
+  // Los intervalos vienen en coordenadas del texto de entrada; cada sustitución
+  // desplaza las siguientes por la diferencia de longitud.
+  let delta = 0;
+  for (let i = 0; i < shown; i++) {
+    const edit = list[i];
+    const replacement = String(edit.replacement);
+    const start = edit.start + delta;
+    const end = start + replacement.length;
+    delta += replacement.length - (edit.end - edit.start);
+    if (!(start >= cursor && end <= out.length)) continue;
+    if (start > cursor) segments.push({ text: out.slice(cursor, start), restored: false });
+    segments.push({ text: out.slice(start, end), restored: true });
+    cursor = end;
+  }
+  if (cursor < out.length) segments.push({ text: out.slice(cursor), restored: false });
+  return { segments, shown, total, truncated: shown < total };
 }
 
 // ─── Mapas TSV: JSON solo cuando el encabezado lo declara ─────────────────────
@@ -685,7 +830,7 @@ function LiveStatus({ message }) {
 }
 
 // ─── Semáforo de riesgo residual ──────────────────────────────────────────────
-function RiskSemaphore({ text, reviewed, onReview, activeIds, whitelist, riskData }) {
+function RiskSemaphore({ text, reviewed, onReview, activeIds, whitelist, riskData, splitTerms = [] }) {
   const computed = useMemo(() => riskData || computeResidualRisk(text, activeIds || null, { whitelist }), [text, riskData, activeIds && activeIds.join(','), whitelist]);
   const { score, hits, warnings = [] } = computed;
   const info = getRiskInfo(score, reviewed);
@@ -705,6 +850,13 @@ function RiskSemaphore({ text, reviewed, onReview, activeIds, whitelist, riskDat
         )}
         {warnings.length > 0 ? (
           <div className="text-xs mt-1 text-[#92400e]">Quedan posibles {warnings.map(w => w.replace(/\s*\(.*?\)/g, '')).join(', ').toLowerCase()} sin ocultar. Si identifican a alguien, actívalos en la pestaña Ajustes.</div>
+        ) : null}
+        {splitTerms.length > 0 ? (
+          <div className="text-xs mt-1 text-[#92400e]" data-split-warning>
+            {splitTerms.length === 1 ? 'La palabra ' : 'Las palabras '}
+            <span className="font-mono">{splitTerms.join(', ')}</span>
+            {splitTerms.length === 1 ? ' es parte de un dato' : ' son parte de datos'} que la app oculta, así que ese dato se oculta igual y solo queda visible esa parte. Si quieres que se vea completo, escríbelo entero en «Personaliza palabras para anonimizar o dejar visibles».
+          </div>
         ) : null}
       </div>
       <label className="flex w-full items-start gap-2 text-sm text-[#333333]">
@@ -999,8 +1151,11 @@ function downloadWordDoc(filename, title, bodyHtml) {
 
 // ─── Descarga combinada: tabla de equivalencias (pág. 1) + texto anonimizado ──
 // Quien llama decide la confirmación (diálogo propio) y ya comprobó el riesgo con sus categorías activas.
-async function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore, riskLabel, timestamp, originalLen, reviewed = false, confirm }) {
-  if (!reviewed || computeResidualRisk(anonText, (activeCats || []).map(c => c.id)).hits.length) return false;
+async function downloadCombinedDoc({ anonText, reps, cats, activeCats, whitelist, riskScore, riskLabel, timestamp, originalLen, reviewed = false, confirm }) {
+  // Revalida con el MISMO criterio que el semáforo, incluida la lista de
+  // palabras autorizadas: sin ella, un dato que el usuario dejó visible a
+  // propósito marcaría riesgo aquí y la descarga se cancelaría en silencio.
+  if (!reviewed || computeResidualRisk(anonText, (activeCats || []).map(c => c.id), { whitelist }).hits.length) return false;
   const ask = confirm || (message => Promise.resolve(window.confirm(message)));
   if (!(await ask('Este respaldo CONFIDENCIAL contiene los datos originales y la tabla de equivalencias. Se guardará en tu computador y puede sincronizarse si eliges una carpeta en la nube. No lo envíes a un modelo de IA. ¿Quieres descargarlo?'))) return false;
   const dateStr = new Date().toISOString().slice(0, 10);
@@ -1062,7 +1217,7 @@ async function downloadCombinedDoc({ anonText, reps, cats, activeCats, riskScore
     reviewLabel + '</p>',
     '<p class="note">Este archivo contiene los originales en su primera parte. NO envíes el archivo a un modelo. Utiliza la descarga separada de texto .txt y comprueba su contenido antes de compartir.</p>',
     anonParas,
-    '<p class="footer">Procesado 100% en navegador &mdash; sin servidores, sin historial automático. &nbsp; futuria.substack.com</p>',
+    '<p class="footer">Texto procesado en tu navegador &mdash; sin historial automático de documentos. &nbsp; futuria.substack.com</p>',
   ].join('\n');
 
   downloadWordDoc('respaldo-CONFIDENCIAL-' + dateStr, 'Respaldo confidencial — FuturIA', body);
@@ -1155,7 +1310,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
       '<div class="meta">FuturIA Anonimizador IA &nbsp;·&nbsp; ' + escXml(dateStr) + '<br>' +
       'Revisión: ' + escXml(riskInfo.label) + '. Reversible con la llave de recuperación; no certifica anonimización completa.</div>' +
       paragraphsHtml +
-      '<div class="footer">Procesado 100% en navegador — sin servidores, sin historial automático. futuria.substack.com</div>' +
+      '<div class="footer">Texto procesado en tu navegador — sin historial automático de documentos. futuria.substack.com</div>' +
       '</body></html>';
 
     // iframe oculto: no depende de pop-ups ni de un temporizador; se imprime al cargar.
@@ -1178,6 +1333,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
       reps,
       cats,
       activeCats,
+      whitelist,
       riskScore: riskData.score,
       riskLabel: riskInfo.label,
       reviewed,
@@ -1239,7 +1395,7 @@ function DocumentViewer({ open, onClose, anonText, reps, cats, activeCats, fileN
 
           {/* Doc footer */}
           <div className="mt-8 border-t border-[#e5e5e5] pt-4 text-xs text-[#6b6b6b]">
-            Procesado 100% en navegador — sin servidores, sin historial automático. &nbsp; futuria.substack.com
+            Texto procesado en tu navegador — sin historial automático de documentos. &nbsp; futuria.substack.com
           </div>
         </div>
       </div>
@@ -1270,28 +1426,28 @@ function CollapsibleSection({ open, onToggle, id, title, subtitle, titleId, chil
 function HowToTab({ onStart }) {
   const steps = [
     { n: '1', icon: '📄', title: 'Pega o sube tu documento',
-      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, pulsa «Cargar un ejemplo» y elige uno de los 50 textos con datos inventados.',
+      desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT, CSV o JSON de esta app. Se procesa el texto, no las imágenes ni el diseño gráfico. Si prefieres probar primero, pulsa «Cargar un ejemplo» y elige uno de los 50 textos con datos inventados.',
       tip: 'Los PDF escaneados (fotos) no tienen texto que leer. Conviértelos con una herramienta de tu empresa; no los subas a un convertidor en línea.' },
     { n: '2', icon: '⚙️', title: 'Revisa los Ajustes (opcional)',
       desc: 'En la pestaña «Ajustes», abre «Selecciona qué tipos de datos anonimizar». Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. En «Personaliza palabras para anonimizar o dejar visibles» puedes añadir proyectos o clientes que siempre deban ocultarse, y palabras que pueden quedar visibles. Se hace una vez por sesión.',
       tip: 'Montos, direcciones, empresas y fechas se detectan por aproximación: si los activas, revisa el resultado con más cuidado.' },
     { n: '3', icon: '🔒', title: 'Pulsa «Anonimizar documento» y revisa',
-      desc: 'Cada dato se cambia por una etiqueta como [PERSONA_1] o [EMAIL_1]; la misma persona recibe siempre la misma etiqueta. El aviso de color te dice si queda algo por ocultar. Lee el resultado, marca «Revisé el texto…» y se activan Copiar y Descargar.',
+      desc: 'Cada dato se cambia por una etiqueta como [PERSONA_1] o [EMAIL_1]; la misma persona recibe siempre la misma etiqueta. El aviso de color te dice si queda algo por ocultar. Lee el resultado, marca «Revisé el texto…» y se activan Copiar y Descargar. Elige Word, PDF, TXT o JSON para descargar el texto completo, sin su llave.',
       tip: 'Toca una etiqueta para ver el dato original o dejarlo visible si no identifica a nadie.' },
     { n: '4', icon: '🔑', title: 'Guarda la llave',
-      desc: 'La llave es un archivo pequeño con la lista «etiqueta → dato real». Es lo único que permite volver a poner los nombres reales. Guárdala junto al documento. Si cierras la pestaña sin guardarla, la app te avisa.',
+      desc: 'La llave es un archivo pequeño con la lista «etiqueta → dato real». Es lo único que permite volver a poner los nombres reales. Guárdala en una ubicación privada, separada del archivo que compartas con la IA. Si cierras la pestaña sin guardarla, la app te avisa.',
       tip: 'La llave y el Word con los originales son CONFIDENCIALES. Nunca los pegues en una IA.' },
     { n: '5', icon: '💬', title: 'Pégalo en la IA',
       desc: '«Copiar para pegar en la IA» añade una instrucción para que el modelo conserve las etiquetas. Haz tu consulta como siempre y copia la respuesta completa, con las etiquetas.',
       tip: 'Aunque el modelo escriba una etiqueta distinto ([PERSONA 1], PERSON_1, en negrita), la recuperación la reconoce.' },
     { n: '6', icon: '🔄', title: 'Restaura los datos originales',
-      desc: 'En «Restaurar datos originales», pega la respuesta de la IA. En la misma sesión la llave se usa sola; en otro momento, sube el archivo de llave o pega la tabla del Word. Los datos restaurados aparecen resaltados para que compruebes que cayeron en su sitio.',
+      desc: 'En «Restaurar datos originales», sube el documento con etiquetas o pega la respuesta de la IA. En la misma sesión la llave se usa sola; en otro momento, sube el archivo de llave o pega la tabla del Word. Los datos restaurados aparecen resaltados para que compruebes que cayeron en su sitio. También puedes descargar el texto restaurado en Word, PDF, TXT o JSON.',
       tip: 'Los archivos descargados y el portapapeles no se borran al cerrar la app; cuida dónde quedan.' },
   ];
   const whyItems = [
     { icon: '🏢', kicker: 'Riesgo', accent: '#b00020', accentBg: '#fff0f1', title: 'Lo que pegas sale de tu empresa', body: 'ChatGPT, Gemini, Claude o Copilot procesan tu texto en servidores de terceros. Según el plan y la configuración, puede quedar almacenado o usarse para entrenar modelos. Un contrato, una nómina o una historia clínica no deberían viajar con nombres y cédulas reales.' },
-    { icon: '⚖️', kicker: 'Obligación', accent: '#2A5B8C', accentBg: '#eaf1f8', title: 'La ley te obliga', body: 'Las leyes de protección de datos de Hispanoamérica (Ecuador, Colombia, México, Argentina, Chile, Perú, España…) exigen tratar los datos personales con una finalidad clara y medidas de seguridad. Compartirlos con un proveedor de IA sin control puede acarrear sanciones y pérdida de confianza de clientes y empleados.' },
-    { icon: '✅', kicker: 'Solución', accent: '#1b7f3b', accentBg: '#e8f5e9', title: 'La IA funciona igual sin los datos reales', body: 'Para resumir, redactar, traducir o analizar, el modelo no necesita saber el nombre real del cliente ni su número de cuenta. Cambias los datos por etiquetas, obtienes la respuesta y los recuperas al final. Nadie fuera de tu equipo ve la información real.' },
+    { icon: '⚖️', kicker: 'Obligación', accent: '#2A5B8C', accentBg: '#eaf1f8', title: 'Cuida los datos que te confían', body: 'Los contratos y las políticas de tu empresa pueden limitar qué información compartes con un proveedor de IA. Revisa las condiciones aplicables y retira los datos que no deban salir de tu organización.' },
+    { icon: '✅', kicker: 'Solución', accent: '#1b7f3b', accentBg: '#e8f5e9', title: 'La IA puede trabajar con etiquetas', body: 'Para muchas tareas de resumen, redacción o traducción puedes sustituir los datos por etiquetas. Revisa que el contexto siga siendo útil y que no queden detalles que permitan identificar a alguien. Con la llave puedes restaurar después las etiquetas conservadas.' },
   ];
   const glossary = [
     ['Dato personal o sensible', 'Cualquier información que identifica a una persona o permite identificarla: nombre, cédula, teléfono, correo, dirección, cuenta bancaria, fecha de nacimiento, datos de salud.'],
@@ -1335,7 +1491,7 @@ function HowToTab({ onStart }) {
         <div className="flex flex-col gap-3 md:flex-row md:items-start">
           <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#e8f5e9] text-xl">🔐</span>
           <div className="min-w-0">
-            <p className="mt-1 text-sm leading-relaxed text-[#333333]">No hay ningún servidor que reciba, guarde o analice tu contenido. Todo ocurre en tu computador y se borra al cerrar la pestaña. Lo puedes comprobar: con <span className="whitespace-nowrap">F12 → pestaña Red</span> verás que no sale ninguna petición mientras anonimizas.</p>
+            <p className="mt-1 text-sm leading-relaxed text-[#333333]">La app no envía tus documentos a un servidor. El texto, los resultados y la llave se mantienen en memoria y se pierden al recargar o cerrar esta página; no hay guardado automático. Lo puedes comprobar: con <span className="whitespace-nowrap">F12 → pestaña Red</span> puedes distinguir la carga de recursos de las solicitudes que enviarían contenido. El procesamiento del texto no requiere enviarlo.</p>
             <p className="mt-1 text-xs text-[#555555]">Las librerías y fuentes sí se cargan desde internet al abrir la app. Las descargas y el portapapeles quedan fuera de este control.</p>
           </div>
         </div>
@@ -1407,7 +1563,7 @@ function PrivacyTab() {
         { icon: '🔒', title: 'Procesamiento local del contenido', body: 'La app procesa texto, PDF y DOCX en el navegador. No envía documentos a un servidor ni llama a un modelo de IA. Usa reglas y términos personalizados. La carga de librerías y fuentes sí necesita internet; no es una aplicación completamente offline.' },
         { icon: '🗑️', title: 'Sin historial automático de documentos', body: 'La app no escribe documentos ni el mapa en localStorage, sessionStorage, cookies o IndexedDB. El contenido y las equivalencias permanecen en memoria mientras trabajas y se pierden al recargar. Borrar sesión retira los datos del estado de la app; no es un borrado forense del computador.' },
         { icon: '📂', title: 'Descargas, portapapeles y copias', body: 'Copiar deja contenido en el portapapeles, cuyo historial o sincronización depende del sistema. Las descargas permanecen en la carpeta elegida; una carpeta de OneDrive u otro servicio puede sincronizarlas. El respaldo confidencial .doc contiene los originales. Borrar sesión no elimina estos archivos, el portapapeles, cachés de recursos ni copias del sistema o de extensiones.' },
-        { icon: '📡', title: 'Sin telemetría ni analítica', body: 'Sin Google Analytics, Mixpanel, Hotjar ni equivalentes. No se registra qué textos procesas, qué categorías usas ni en qué momentos.' },
+        { icon: '📡', title: 'Sin telemetría ni analítica', body: 'La app no incorpora Google Analytics, Mixpanel, Hotjar ni analítica equivalente, ni registra el contenido de tus documentos. El alojamiento y tu navegador pueden conservar registros técnicos de acceso; eso no significa que la app envíe el texto procesado.' },
         { icon: '⚠️', title: 'Límites de detección', body: 'Los nombres se detectan mediante contextos como Paciente, Trabajador, Sr. o Firma; un nombre aislado, un apodo o una entidad en otro idioma puede quedar sin sustituir. También pueden existir falsos positivos. No hay OCR para PDF escaneado. Las sustituciones reversibles son seudonimización, no una garantía de anonimización completa. Debes revisar los detalles que permiten identificar a una persona antes de compartir.' },
       ].map(item => (
         <div key={item.title} className="rounded-[28px] border border-[#e5e5e5] bg-white p-6 shadow-sm">
@@ -1421,7 +1577,7 @@ function PrivacyTab() {
         </div>
       ))}
       <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] p-6 text-sm text-[#333333]">
-        <strong className="text-[#222222]">Verificación técnica:</strong> en DevTools (F12 → Network) puedes distinguir la descarga de React, Babel, Tailwind, fuentes, pdf.js y mammoth del procesamiento del documento. No hay API que reciba su contenido. Esto no protege frente a extensiones maliciosas, un computador comprometido ni cambios en las librerías externas.
+        <strong className="text-[#222222]">Verificación técnica:</strong> en DevTools (F12 → Network) puedes distinguir la descarga de los archivos de la aplicación, fuentes y motores de lectura del procesamiento del documento. No hay API que reciba su contenido. Esto no protege frente a extensiones maliciosas, un computador comprometido ni cambios en las librerías externas.
       </div>
     </div>
   );
@@ -1431,27 +1587,13 @@ function PrivacyTab() {
 
 async function loadPdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib;
-  await new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = window.PDFJS_CDN;
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-  // Fetch worker and create a blob URL to avoid CORS issues when running from file://
-  try {
-    const resp = await fetch(window.PDFJS_WORKER);
-    if (resp.ok) {
-      const text = await resp.text();
-      const blob = new Blob([text], { type: 'application/javascript' });
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
-    } else {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFJS_WORKER;
-    }
-  } catch (_) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = window.PDFJS_WORKER;
-  }
-  return window.pdfjsLib;
+  // El import() vive en el script clásico de la cabecera (importPdfJsModule):
+  // aquí Babel lo convertiría en require(). El paquete sirve el módulo y su
+  // worker desde el mismo origen, así que no hace falta un blob para el worker.
+  const lib = await window.importPdfJsModule();
+  lib.GlobalWorkerOptions.workerSrc = new URL(window.PDFJS_WORKER, document.baseURI).href;
+  window.pdfjsLib = lib;
+  return lib;
 }
 
 async function loadMammoth() {
@@ -1459,6 +1601,8 @@ async function loadMammoth() {
   await new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = window.MAMMOTH_CDN;
+    s.integrity = window.MAMMOTH_SRI;
+    s.crossOrigin = 'anonymous';
     s.onload = resolve;
     s.onerror = reject;
     document.head.appendChild(s);
@@ -1574,6 +1718,769 @@ async function extractTextFromFile(file, onProgress) {
 
   throw new Error('Formato no compatible: .' + ext + '. Usa PDF, DOCX, TXT o CSV. El DOC antiguo requiere conversión a DOCX.');
 }
+
+// ─── Modelo de documentos textuales ──────────────────────────────────────────
+// Inline JS (sin imports/exports), compatible con el script React/Babel existente.
+// API pública (funciones declaradas en el mismo ámbito que el HTML):
+//   makeTextDocument(text) -> {text, blocks}
+//   cleanTextDocument(model) -> modelo nuevo, whitelist; formato inválido => plain.
+//   parseTextDocumentJSON(json) -> modelo; schema/tipos inválidos => error.
+//   serializeTextDocument(model, kind) -> string JSON, kind obligatorio.
+//   remapTextDocument(model, out, edits) -> modelo; edits NO demostrados => error.
+//   textDocumentRuns(model, block) -> [{text, bold:boolean, italic:boolean}]
+//   readTextDocumentFile(file, onProgress=()=>{}) -> Promise<modelo>
+//
+// Offsets UTF-16, intervalos [start, end); text es la única fuente de contenido.
+// Bloques: {start,end,kind:'paragraph'|'heading'|'bullet'|'numbered',level?:1..6,
+//           runs:[{start,end,bold?:true,italic?:true}]}.
+// Metadata SOLO numérica/enums/booleanos; no guarda texto/runs originales ni URLs.
+// Los spans se normalizan por unión de estilos; los huecos son texto sin estilo.
+//
+// TXT/CSV: UTF-8 estricto, incluido BOM; no cambia espacios/CRLF/vacíos. Cada línea
+// es un bloque. JSON mantiene text exacto y exige cuatro campos en su envelope:
+// {format:'futuria-text',version:1,kind:'anonymized'|'restored',document:{text,blocks}}.
+// kind NO anonimiza ni verifica por sí solo el contenido: eso pertenece al motor.
+// DOCX: un '\n' entre bloques, <br> dentro del bloque, viñetas y numeración literal
+// (1..n) dentro de text. Al exportar NO añadir otra viñeta/número sobre ese texto.
+// PDF: delega extractTextFromFile; no inventa estilos ni OCR. DOC OLE no compatible.
+// Los separadores pertenecen a text, fuera de los rangos de bloque. Para TXT/JSON
+// exportar text, no reconstruirlo uniendo los bloques con separadores nuevos.
+//
+// Remap exige edits ordenados/no solapados [{start,end,replacement:string}] y
+// demuestra que aplicarlos al fuente da out EXACTAMENTE antes de usar formato.
+// Cada reemplazo se emite una vez con SOLO estilos comunes a todo el span borrado.
+// Inserciones heredan del vecino derecho (al final del bloque, del izquierdo).
+// Cruces de bloque
+// o edición de saltos => makeTextDocument(out). Nunca se oculta contenido fuente.
+// La mezcla de estilos borrada NO es reconstruible al restaurar: no se almacena.
+//
+// Límites: archivo <= MAX_FILE_BYTES existente (fallback 25 MiB), JSON <=25 MiB
+// UTF-8, text <=25*1024*1024 unidades UTF-16, 100000 bloques, 250000 runs/edits.
+// DOCX añade límites post-conversión de HTML/nodos/profundidad; NO impone un límite
+// duro de memoria/tiempo a la descompresión ZIP de Mammoth ni conserva layout.
+const TEXT_DOCUMENT_MAX_CHARS = 25 * 1024 * 1024;
+const TEXT_DOCUMENT_MAX_BLOCKS = 100000;
+const TEXT_DOCUMENT_MAX_RUNS = 250000;
+
+function tdRequireText(text) {
+  if (typeof text !== 'string') throw new TypeError('El texto debe ser un string.');
+  if (text.length > TEXT_DOCUMENT_MAX_CHARS) throw new Error('El texto supera el límite del documento.');
+  return text;
+}
+
+function makeTextDocument(text) {
+  tdRequireText(text);
+  const blocks = [];
+  const breaks = /\r\n|\r|\n/g;
+  let start = 0, match;
+  while ((match = breaks.exec(text))) {
+    if (blocks.length >= TEXT_DOCUMENT_MAX_BLOCKS - 1) throw new Error('Demasiados párrafos en el documento.');
+    blocks.push({ start, end: match.index, kind: 'paragraph', runs: [] });
+    start = match.index + match[0].length;
+  }
+  blocks.push({ start, end: text.length, kind: 'paragraph', runs: [] });
+  return { text, blocks };
+}
+function tdOffset(value, limit) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= limit;
+}
+
+function tdAddRun(runs, start, end, bold, italic) {
+  if (end <= start || (!bold && !italic)) return;
+  const previous = runs[runs.length - 1];
+  if (previous && previous.end === start && !!previous.bold === !!bold && !!previous.italic === !!italic) {
+    previous.end = end;
+  } else {
+    const run = { start, end };
+    if (bold) run.bold = true;
+    if (italic) run.italic = true;
+    runs.push(run);
+  }
+}
+
+function tdNormalizeRuns(block, budget) {
+  if (!Array.isArray(block.runs) || (budget.count += block.runs.length) > TEXT_DOCUMENT_MAX_RUNS) {
+    throw new Error('Runs inválidos o demasiados estilos.');
+  }
+  const events = [];
+  for (const run of block.runs) {
+    if (!run || typeof run !== 'object' || !tdOffset(run.start, block.end) ||
+        !tdOffset(run.end, block.end) || run.start < block.start || run.end < run.start ||
+        (run.bold !== undefined && typeof run.bold !== 'boolean') ||
+        (run.italic !== undefined && typeof run.italic !== 'boolean')) {
+      throw new Error('Offsets o estilos de run inválidos.');
+    }
+    if (run.start === run.end || (!run.bold && !run.italic)) continue;
+    events.push([run.start, run.bold ? 1 : 0, run.italic ? 1 : 0]);
+    events.push([run.end, run.bold ? -1 : 0, run.italic ? -1 : 0]);
+  }
+  events.sort((a, b) => a[0] - b[0]);
+  const runs = [];
+  let bold = 0, italic = 0, cursor = block.start, index = 0;
+  while (index < events.length) {
+    const position = events[index][0];
+    tdAddRun(runs, cursor, position, bold > 0, italic > 0);
+    while (index < events.length && events[index][0] === position) {
+      bold += events[index][1];
+      italic += events[index][2];
+      index++;
+    }
+    cursor = position;
+  }
+  if (runs.length > TEXT_DOCUMENT_MAX_RUNS) throw new Error('Demasiados estilos normalizados.');
+  return runs;
+}
+
+function tdSanitizeDocument(model) {
+  if (!model || typeof model !== 'object') throw new TypeError('Documento inválido.');
+  const text = tdRequireText(model.text);
+  if (!Array.isArray(model.blocks) || !model.blocks.length || model.blocks.length > TEXT_DOCUMENT_MAX_BLOCKS) {
+    throw new Error('Bloques inválidos o demasiados párrafos.');
+  }
+  const blocks = [], budget = { count: 0 };
+  let previousEnd = 0, normalizedRunCount = 0;
+  for (const block of model.blocks) {
+    if (!block || typeof block !== 'object' || !tdOffset(block.start, text.length) ||
+        !tdOffset(block.end, text.length) || block.end < block.start ||
+        !['paragraph', 'heading', 'bullet', 'numbered'].includes(block.kind) ||
+        (block.level !== undefined && (!Number.isInteger(block.level) || block.level < 1 || block.level > 6))) {
+      throw new Error('Tipo u offsets de bloque inválidos.');
+    }
+    const first = blocks.length === 0;
+    if ((first && block.start !== 0) || (!first && (block.start <= previousEnd || !/^[\r\n]+$/.test(text.slice(previousEnd, block.start))))) {
+      throw new Error('Los bloques omiten contenido o se solapan.');
+    }
+    const clean = { start: block.start, end: block.end, kind: block.kind, runs: tdNormalizeRuns(block, budget) };
+    if (block.level !== undefined && block.kind !== 'paragraph') clean.level = block.level;
+    normalizedRunCount += clean.runs.length;
+    if (normalizedRunCount > TEXT_DOCUMENT_MAX_RUNS) throw new Error('Demasiados estilos normalizados.');
+    blocks.push(clean);
+    previousEnd = block.end;
+  }
+  if (previousEnd !== text.length) throw new Error('Los bloques omiten el final del texto.');
+  return { text, blocks };
+}
+
+function cleanTextDocument(model) {
+  // En un modelo interno inválido solo se descarta formato, nunca contenido.
+  tdRequireText(model && model.text);
+  try { return tdSanitizeDocument(model); }
+  catch (_) { return makeTextDocument(model.text); }
+}
+function tdCheckJSONSize(json) {
+  if (typeof json !== 'string') throw new TypeError('El JSON debe ser texto.');
+  if (json.length > TEXT_DOCUMENT_MAX_CHARS || new TextEncoder().encode(json).length > TEXT_DOCUMENT_MAX_CHARS) {
+    throw new Error('El JSON supera el límite admitido.');
+  }
+}
+
+function serializeTextDocument(model, kind) {
+  if (kind !== 'anonymized' && kind !== 'restored') throw new Error('Tipo (kind) de documento inválido.');
+  const json = JSON.stringify({ format: 'futuria-text', version: 1, kind, document: cleanTextDocument(model) });
+  tdCheckJSONSize(json);
+  return json;
+}
+
+function parseTextDocumentJSON(json) {
+  tdCheckJSONSize(json);
+  let envelope;
+  try { envelope = JSON.parse(json); }
+  catch (_) { throw new Error('El archivo no contiene JSON válido.'); }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) ||
+      Object.keys(envelope).length !== 4 ||
+      !['format', 'version', 'kind', 'document'].every(key => Object.prototype.hasOwnProperty.call(envelope, key)) ||
+      envelope.format !== 'futuria-text' || envelope.version !== 1 ||
+      (envelope.kind !== 'anonymized' && envelope.kind !== 'restored')) {
+    throw new Error('Se requiere un documento futuria-text v1; no una llave ni un respaldo.');
+  }
+  // A diferencia del limpiador interno, un archivo externo mal formado se rechaza.
+  return tdSanitizeDocument(envelope.document);
+}
+function tdBlockSegments(block, runs) {
+  const segments = [];
+  let cursor = block.start;
+  for (const run of runs) {
+    if (run.start > cursor) segments.push({ start: cursor, end: run.start, bold: false, italic: false });
+    segments.push({ start: run.start, end: run.end, bold: !!run.bold, italic: !!run.italic });
+    cursor = run.end;
+  }
+  if (cursor < block.end) segments.push({ start: cursor, end: block.end, bold: false, italic: false });
+  return segments;
+}
+
+function textDocumentRuns(model, block) {
+  const text = tdRequireText(model && model.text);
+  if (!block || !tdOffset(block.start, text.length) || !tdOffset(block.end, text.length) || block.end < block.start) {
+    throw new Error('Offsets del bloque inválidos.');
+  }
+  let runs;
+  try { runs = tdNormalizeRuns(block, { count: 0 }); }
+  catch (_) { runs = []; }
+  return tdBlockSegments(block, runs).map(segment => ({
+    text: text.slice(segment.start, segment.end), bold: segment.bold, italic: segment.italic,
+  }));
+}
+function remapTextDocument(model, out, edits) {
+  tdRequireText(out);
+  const source = cleanTextDocument(model);
+  if (!Array.isArray(edits) || edits.length > TEXT_DOCUMENT_MAX_RUNS) throw new Error('Lista de edits inválida o demasiado grande.');
+  const pieces = [];
+  let cursor = 0, projectedLength = 0;
+  for (const edit of edits) {
+    if (!edit || !tdOffset(edit.start, source.text.length) || !tdOffset(edit.end, source.text.length) ||
+        edit.end < edit.start || edit.start < cursor || typeof edit.replacement !== 'string') {
+      throw new Error('Los edits deben tener offsets válidos, estar ordenados y no solaparse.');
+    }
+    projectedLength += edit.start - cursor + edit.replacement.length;
+    if (projectedLength > TEXT_DOCUMENT_MAX_CHARS) throw new Error('La salida supera el límite de texto.');
+    pieces.push(source.text.slice(cursor, edit.start), edit.replacement);
+    cursor = edit.end;
+  }
+  if (projectedLength + source.text.length - cursor !== out.length) throw new Error('La salida no coincide con los edits.');
+  pieces.push(source.text.slice(cursor));
+  if (pieces.join('') !== out) throw new Error('La salida no coincide con la aplicación exacta de los edits.');
+  if (!edits.length) return source;
+
+  const owned = source.blocks.map(() => []);
+  let blockIndex = 0;
+  for (const edit of edits) {
+    while (blockIndex < source.blocks.length && source.blocks[blockIndex].end < edit.start) blockIndex++;
+    const block = source.blocks[blockIndex];
+    if (!block || edit.start < block.start || edit.end > block.end ||
+        /[\r\n]/.test(edit.replacement) || /[\r\n]/.test(source.text.slice(edit.start, edit.end))) {
+      return makeTextDocument(out);
+    }
+    owned[blockIndex].push(edit);
+  }
+
+  const blocks = [];
+  let delta = 0;
+  for (let index = 0; index < source.blocks.length; index++) {
+    const block = source.blocks[index];
+    const segments = tdBlockSegments(block, block.runs);
+    const runs = [];
+    const start = block.start + delta;
+    let target = start, position = block.start, segmentIndex = 0;
+    // Consume cada tramo fuente una sola vez; un reemplazo se emite una vez.
+    const consume = (from, to, copy) => {
+      while (segmentIndex < segments.length && segments[segmentIndex].end <= from) segmentIndex++;
+      if (from === to) {
+        const neighbor = segments[segmentIndex] || segments[segments.length - 1];
+        return { bold: !!(neighbor && neighbor.bold), italic: !!(neighbor && neighbor.italic) };
+      }
+      let bold = true, italic = true;
+      while (from < to) {
+        const segment = segments[segmentIndex];
+        const end = Math.min(to, segment.end);
+        bold = bold && segment.bold;
+        italic = italic && segment.italic;
+        if (copy) {
+          tdAddRun(runs, target, target + end - from, segment.bold, segment.italic);
+          target += end - from;
+        }
+        from = end;
+        if (end === segment.end) segmentIndex++;
+      }
+      return { bold, italic };
+    };
+    for (const edit of owned[index]) {
+      consume(position, edit.start, true);
+      const common = consume(edit.start, edit.end, false);
+      // Solo hereda estilos comunes a TODO el dato; no mezcla runs de origen.
+      tdAddRun(runs, target, target + edit.replacement.length, common.bold, common.italic);
+      target += edit.replacement.length;
+      position = edit.end;
+    }
+    consume(position, block.end, true);
+    const mapped = { start, end: target, kind: block.kind, runs };
+    if (block.level !== undefined) mapped.level = block.level;
+    blocks.push(mapped);
+    delta = target - block.end;
+  }
+  return cleanTextDocument({ text: out, blocks });
+}
+function tdDocumentFromHtml(html) {
+  if (typeof html !== 'string' || html.length > TEXT_DOCUMENT_MAX_CHARS * 4) throw new Error('El HTML convertido supera el límite admitido.');
+  if (typeof document === 'undefined' || !document.implementation) throw new Error('La lectura DOCX necesita un DOM de navegador.');
+  // Template INERTE en documento SIN browsing context: no parseFromString ni
+  // inserción en el DOM vivo, ni lectura de atributos/enlaces/recursos.
+  const detached = document.implementation.createHTMLDocument('');
+  const template = detached.createElement('template');
+  template.innerHTML = html;
+  const blocks = [], textParts = [];
+  let active = null, length = 0, nodeCount = 0, runCount = 0;
+  const begin = (context, heading) => {
+    const firstItemBlock = context && !context.used;
+    const prefix = firstItemBlock ? context.prefix : '';
+    active = { kind: heading ? 'heading' : firstItemBlock ? context.kind : 'paragraph',
+      level: heading || (firstItemBlock ? context.level : undefined), parts: prefix ? [prefix] : [], length: prefix.length, runs: [] };
+    if (context) context.used = true;
+  };
+  const append = (value, context, bold, italic, inside) => {
+    if (!value || (!active && !inside && /^\s*$/.test(value))) return;
+    if (!active) begin(context);
+    if (length + active.length + value.length > TEXT_DOCUMENT_MAX_CHARS) throw new Error('El texto convertido supera el límite.');
+    tdAddRun(active.runs, active.length, active.length + value.length, bold, italic);
+    active.parts.push(value);
+    active.length += value.length;
+  };
+  const flush = () => {
+    if (!active) return;
+    if (blocks.length >= TEXT_DOCUMENT_MAX_BLOCKS) throw new Error('Demasiados párrafos en el documento.');
+    if (blocks.length) { textParts.push('\n'); length++; }
+    const start = length;
+    const value = active.parts.join('');
+    length += value.length;
+    if (length > TEXT_DOCUMENT_MAX_CHARS || (runCount += active.runs.length) > TEXT_DOCUMENT_MAX_RUNS) throw new Error('El documento convertido supera los límites.');
+    const block = { start, end: length, kind: active.kind,
+      runs: active.runs.map(run => {
+        const mapped = { start: start + run.start, end: start + run.end };
+        if (run.bold) mapped.bold = true;
+        if (run.italic) mapped.italic = true;
+        return mapped;
+      }) };
+    if (active.level !== undefined) block.level = active.level;
+    blocks.push(block);
+    textParts.push(value);
+    active = null;
+  };
+  const excluded = new Set(['SCRIPT', 'STYLE', 'IMG', 'PICTURE', 'SVG', 'MATH', 'IFRAME', 'OBJECT', 'EMBED', 'VIDEO', 'AUDIO', 'SOURCE', 'TRACK', 'CANVAS', 'META', 'LINK', 'BASE', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'TEMPLATE', 'NOSCRIPT']);
+  const containers = new Set(['DIV', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH', 'DL', 'DT', 'DD']);
+  const children = (node, context, bold, italic, inside, depth, listDepth) => {
+    for (const child of node.childNodes) visit(child, context, bold, italic, inside, depth + 1, listDepth);
+  };
+  const visit = (node, context, bold, italic, inside, depth, listDepth) => {
+    if (++nodeCount > 1000000 || depth > 128) throw new Error('La estructura DOCX es demasiado compleja.');
+    if (node.nodeType === 3) { append(node.nodeValue, context, bold, italic, inside); return; }
+    if (node.nodeType !== 1) return; // Incluye comentarios HTML: descartados.
+    const tag = node.tagName.toUpperCase();
+    if (excluded.has(tag)) return;
+    if (tag === 'BR') { append('\n', context, bold, italic, true); return; }
+    if (tag === 'UL' || tag === 'OL') {
+      // Un ítem vacío que solo contiene otra lista precede a sus hijos.
+      if (context && !context.used) begin(context);
+      flush();
+      let number = 0;
+      const level = Math.min(6, listDepth + 1);
+      for (const child of node.children) {
+        if (child.tagName.toUpperCase() !== 'LI') continue;
+        number++;
+        const item = { kind: tag === 'OL' ? 'numbered' : 'bullet', level, used: false,
+          prefix: '  '.repeat(level - 1) + (tag === 'OL' ? number + '. ' : '• ') };
+        children(child, item, bold, italic, false, depth, listDepth + 1);
+        if (!item.used) begin(item);
+        flush();
+      }
+      return;
+    }
+    if (tag === 'P' || /^H[1-6]$/.test(tag)) {
+      flush();
+      begin(context, tag === 'P' ? undefined : Number(tag.slice(1)));
+      children(node, context, bold, italic, true, depth, listDepth);
+      flush();
+      return;
+    }
+    if (containers.has(tag)) {
+      flush();
+      children(node, context, bold, italic, inside, depth, listDepth);
+      flush();
+      return;
+    }
+    children(node, context, bold || tag === 'STRONG' || tag === 'B', italic || tag === 'EM' || tag === 'I', inside, depth, listDepth);
+  };
+  for (const node of template.content.childNodes) visit(node, null, false, false, false, 0, 0);
+  flush();
+  return blocks.length ? tdSanitizeDocument({ text: textParts.join(''), blocks }) : makeTextDocument('');
+}
+
+async function readTextDocumentFile(file, onProgress = () => {}) {
+  const limit = typeof MAX_FILE_BYTES === 'number' ? MAX_FILE_BYTES : TEXT_DOCUMENT_MAX_CHARS;
+  if (!file || typeof file.name !== 'string' || !Number.isSafeInteger(file.size) || file.size < 0) {
+    throw new Error('Archivo o tamaño inválido.');
+  }
+  if (file.size > limit) throw new Error('El archivo es demasiado grande. El máximo admitido es ' + (limit / 1024 / 1024) + ' MB.');
+  if (file.size === 0) throw new Error('El archivo está vacío (0 bytes).');
+  const ext = file.name.toLowerCase().split('.').pop();
+  if (ext === 'txt' || ext === 'csv' || ext === 'json') {
+    onProgress('Leyendo documento textual…');
+    // ignoreBOM=true conserva U+FEFF en TXT/CSV; no normaliza espacios ni saltos.
+    const buffer = await file.arrayBuffer();
+    let text;
+    try { text = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(buffer); }
+    catch (_) { throw new Error('La codificación no es UTF-8 válida. Guarda el archivo como UTF-8 antes de importarlo.'); }
+    return ext === 'json' ? parseTextDocumentJSON(text) : makeTextDocument(text);
+  }
+  if (ext === 'pdf') {
+    const headerBuffer = typeof file.slice === 'function' ? await file.slice(0, 1024).arrayBuffer() : (await file.arrayBuffer()).slice(0, 1024);
+    const header = new TextDecoder('ascii').decode(headerBuffer);
+    if (!header.includes('%PDF-')) throw new Error('Firma PDF inválida: el archivo parece estar renombrado o dañado.');
+    if (typeof extractTextFromFile !== 'function') throw new Error('No está disponible el extractor PDF existente.');
+    // El extractor conserva sus límites de páginas y reconstrucción geométrica.
+    // No se infieren negritas/cursivas a partir de fuentes o coordenadas.
+    return makeTextDocument(await extractTextFromFile(file, onProgress));
+  }
+  if (ext === 'docx' || ext === 'doc') {
+    const arrayBuffer = await file.arrayBuffer();
+    const signature = new Uint8Array(arrayBuffer.slice(0, 8));
+    if (signature[0] === 0xd0 && signature[1] === 0xcf && signature[2] === 0x11 && signature[3] === 0xe0) {
+      throw new Error('Este archivo es del formato antiguo de Word (97-2003), que no es compatible. Ábrelo en Word y usa «Archivo → Guardar como» → «Documento de Word (.docx)», o copia y pega el texto en Anonimizar texto.');
+    }
+    if (signature[0] !== 0x50 || signature[1] !== 0x4b) throw new Error('El archivo no parece un documento de Word válido. Se requiere DOCX (ZIP); comprueba que no esté dañado ni renombrado desde otro formato.');
+    if (typeof loadMammoth !== 'function') throw new Error('No está disponible el motor DOCX.');
+    onProgress('Cargando motor Word…');
+    const mammoth = await loadMammoth();
+    onProgress('Extrayendo texto y estructura del documento…');
+    let result;
+    try {
+      result = await mammoth.convertToHtml({ arrayBuffer }, {
+        ignoreEmptyParagraphs: false, includeDefaultStyleMap: true, includeEmbeddedStyleMap: false,
+        styleMap: [
+          'p.Title => h1:fresh', 'p.Subtitle => h2:fresh', "r[style-name='Emphasis'] => em",
+          'p:unordered-list(6) => ' + 'ul|ol > li > '.repeat(5) + 'ul > li:fresh',
+          'p:ordered-list(6) => ' + 'ul|ol > li > '.repeat(5) + 'ol > li:fresh',
+        ],
+        convertImage: () => [], // No llama image.read(), ni genera <img> o data URLs.
+      });
+    } catch (_) { throw new Error('No se pudo leer el DOCX: archivo corrupto, protegido o formato no válido.'); }
+    return tdDocumentFromHtml(result.value);
+  }
+  throw new Error('Formato no compatible: usa PDF, DOCX, TXT, CSV o futuria-text JSON.');
+}
+// ─── Fin modelo de documentos textuales ───────────────────────────────────────
+
+
+// ─── Exportación textual multiformato ─────────────────────────────────────────
+// Contrato: requiere cleanTextDocument, serializeTextDocument y textDocumentRuns.
+const textDocumentExport = (() => {
+  // Unpkg serves .cjs with a JavaScript MIME. jsDelivr returns application/node
+  // plus nosniff for this exact DOCX asset, which browsers reject as a script.
+  const assets = {
+    docx: {
+      url: 'https://unpkg.com/docx@9.5.1/dist/index.umd.cjs',
+      integrity: 'sha384-DUN4K8DMkxuDfzO23vSB/r3sICcVTF+ySEUvsNf4rbnP+OXDXeJ7bTmRLD87Sx7w',
+    },
+    pdfmake: {
+      url: 'https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/pdfmake.min.js',
+      integrity: 'sha384-G23ofMOEI98f9UnroUBjDi6Ll55Y5E6bOX4VAMJo0nIbuQRIxzn0g4athUOb58zs',
+    },
+    fonts: {
+      url: 'https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/vfs_fonts.js',
+      integrity: 'sha384-pv+tpy6KGI5sKXJDf7oGPdvyVNKYXfAmDYpZ3r3PNP0d13PJQ6YMiiAEndd5sU15',
+    },
+  };
+  const scriptPromises = new Map();
+  const libraryPromises = new Map();
+  function cached(cache, key, create) {
+    if (cache.has(key)) return cache.get(key);
+    const promise = Promise.resolve().then(create);
+    cache.set(key, promise);
+    promise.catch(() => { if (cache.get(key) === promise) cache.delete(key); });
+    return promise;
+  }
+  function loadScript(asset) {
+    return cached(scriptPromises, asset.url, () => new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      let settled = false;
+      const finish = error => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        script.onload = null;
+        script.onerror = null;
+        if (error) { script.remove(); reject(error); }
+        else resolve();
+      };
+      const timer = setTimeout(() => finish(new Error('Se agotó el tiempo para cargar la biblioteca de exportación. Reintenta con conexión.')), 25000);
+      script.async = true;
+      script.type = 'text/javascript';
+      script.crossOrigin = 'anonymous';
+      script.referrerPolicy = 'no-referrer';
+      script.integrity = asset.integrity;
+      script.src = asset.url;
+      script.onload = () => finish();
+      script.onerror = () => finish(new Error('No se pudo cargar la biblioteca de exportación. Comprueba la conexión e inténtalo otra vez.'));
+      try { document.head.appendChild(script); } catch (error) { finish(error); }
+    }));
+  }
+  function docxReady() {
+    const lib = globalThis.docx;
+    return lib && typeof lib.Document === 'function' && typeof lib.Paragraph === 'function' &&
+      typeof lib.TextRun === 'function' && typeof lib.Packer?.toBlob === 'function';
+  }
+  function load(format) {
+    validate(format, 'anonymized');
+    if (format === 'txt' || format === 'json') return Promise.resolve(null);
+    return cached(libraryPromises, format, async () => {
+      if (format === 'docx') {
+        if (!docxReady()) await loadScript(assets.docx);
+        if (!docxReady()) {
+          scriptPromises.delete(assets.docx.url);
+          throw new Error('La biblioteca DOCX no se inició correctamente. Reintenta.');
+        }
+        return globalThis.docx;
+      }
+      if (typeof globalThis.pdfMake?.createPdf !== 'function') await loadScript(assets.pdfmake);
+      if (typeof globalThis.pdfMake?.createPdf !== 'function') {
+        scriptPromises.delete(assets.pdfmake.url);
+        throw new Error('La biblioteca PDF no se inició correctamente. Reintenta.');
+      }
+      await loadScript(assets.fonts);
+      return globalThis.pdfMake;
+    });
+  }
+  function validate(format, kind) {
+    if (!['docx', 'pdf', 'txt', 'json'].includes(format)) throw new Error('Formato de exportación no admitido.');
+    if (!['anonymized', 'restored'].includes(kind)) throw new Error('Tipo de documento de exportación no admitido.');
+  }
+  function project(model) {
+    const source = cleanTextDocument(model);
+    if (!source || typeof source.text !== 'string') throw new TypeError('El documento debe contener texto.');
+    const invalid = () => new Error('La estructura del documento de texto no es válida.');
+    const blocks = (Array.isArray(source.blocks) ? source.blocks : []).map(block => {
+      if (!block || !offset(block.start, 0, source.text.length) || !offset(block.end, block.start, source.text.length) ||
+          !['paragraph', 'heading', 'bullet', 'numbered'].includes(block.kind)) throw invalid();
+      const safe = { start: block.start, end: block.end, kind: block.kind, runs: [] };
+      if (Number.isInteger(block.level)) safe.level = Math.max(0, Math.min(9, block.level));
+      for (const run of (Array.isArray(block.runs) ? block.runs : [])) {
+        if (!run || !offset(run.start, block.start, block.end) || !offset(run.end, run.start, block.end)) throw invalid();
+        const part = { start: run.start, end: run.end };
+        if (run.bold === true) part.bold = true;
+        if (run.italic === true) part.italic = true;
+        safe.runs.push(part);
+      }
+      return safe;
+    });
+    return { text: source.text, blocks };
+  }
+  function progress(format, kind, phase, completed = 0, total = 0) {
+    // Deliberately no text, source filename, equivalences or key in UI events.
+    if (typeof globalThis.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      globalThis.dispatchEvent(new CustomEvent('text-document-export-progress', {
+        detail: { format, kind, phase, completed, total },
+      }));
+    }
+  }
+  function offset(value, lower, upper) {
+    return Number.isInteger(value) && value >= lower && value <= upper;
+  }
+  async function paragraphs(model, format, kind) {
+    const spans = [];
+    let position = 0;
+    const blocks = model.blocks.slice().sort((a, b) => a.start - b.start);
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (!offset(block.start, position, model.text.length) || !offset(block.end, block.start, model.text.length)) {
+        throw new Error('Los límites de los párrafos no son válidos. Revisa el texto antes de exportar.');
+      }
+      if (block.start > position) spans.push({ start: position, end: block.start });
+      const runs = textDocumentRuns(model, block);
+      if (!Array.isArray(runs) || runs.some(run => typeof run.text !== 'string') ||
+          runs.map(run => run.text).join('') !== model.text.slice(block.start, block.end)) {
+        throw new Error('No se pudo reconstruir el texto limpio con sus estilos. Revisa el resultado.');
+      }
+      position = block.start;
+      for (const run of runs) {
+        if (run.text.length) spans.push({ start: position, end: position + run.text.length, bold: run.bold === true, italic: run.italic === true, block });
+        position += run.text.length;
+      }
+      position = block.end;
+      if (i && i % 128 === 0) {
+        progress(format, kind, 'preparing', i, blocks.length);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    if (position < model.text.length) spans.push({ start: position, end: model.text.length });
+    const result = [];
+    let spanIndex = 0;
+    const addLine = (start, end) => {
+      while (spanIndex < spans.length && spans[spanIndex].end <= start) spanIndex++;
+      const runs = [];
+      let block;
+      for (let i = spanIndex; i < spans.length && spans[i].start < end; i++) {
+        const span = spans[i];
+        if (span.end <= start) continue;
+        if (!block && span.block) block = span.block;
+        const text = model.text.slice(Math.max(start, span.start), Math.min(end, span.end));
+        if (text) runs.push({ text, bold: span.bold === true, italic: span.italic === true });
+      }
+      result.push({ runs, kind: block?.kind || 'paragraph', level: block?.level });
+    };
+    const newline = /\r\n|\r|\n/g;
+    let start = 0;
+    let match;
+    while ((match = newline.exec(model.text)) !== null) {
+      addLine(start, match.index);
+      start = match.index + match[0].length;
+      if (result.length % 128 === 0) {
+        progress(format, kind, 'preparing', start, model.text.length);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    // Include empty input and the final empty paragraph after a trailing newline.
+    addLine(start, model.text.length);
+    progress(format, kind, 'preparing', model.text.length, model.text.length);
+    return result;
+  }
+  async function docxBlob(lib, model, kind) {
+    const lines = await paragraphs(model, 'docx', kind);
+    const children = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const runs = [];
+      for (const run of line.runs) {
+        const parts = run.text.split('\t');
+        const emphasis = {};
+        if (run.bold) emphasis.bold = true;
+        if (run.italic) emphasis.italics = true;
+        parts.forEach((part, index) => {
+          if (index) runs.push(new lib.TextRun({ children: [new lib.Tab()], ...emphasis }));
+          // Use text, NOT string children: DOCX string children such as CURRENT
+          // are interpreted by the library as fields rather than literal text.
+          if (part) runs.push(new lib.TextRun({ text: part, ...emphasis }));
+        });
+      }
+      const options = { children: runs, spacing: { before: 0, after: 0, line: 276 } };
+      if (line.kind === 'heading') {
+        const level = Math.max(1, Math.min(6, line.level || 1));
+        options.heading = lib.HeadingLevel['HEADING_' + level];
+      } else if (line.kind === 'bullet' || line.kind === 'numbered') {
+        options.style = 'ListParagraph';
+        options.indent = { left: 360 * (Math.max(0, Math.min(8, line.level || 0)) + 1) };
+      } else options.style = 'Normal';
+      // Existing bullet/number strings remain literal: never add a second marker.
+      children.push(new lib.Paragraph(options));
+      if (i && i % 128 === 0) {
+        progress('docx', kind, 'preparing', i, lines.length);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    const defaultStyles = { document: { run: { font: 'Arial', size: 22 }, paragraph: { spacing: { after: 0 } } } };
+    [44, 36, 30, 26, 24, 22].forEach((size, index) => {
+      defaultStyles['heading' + (index + 1)] = { run: { font: 'Arial', size, color: '111111', bold: true } };
+    });
+    const doc = new lib.Document({
+      creator: '', lastModifiedBy: '', title: '', subject: '', description: '', keywords: '',
+      customProperties: [],
+      styles: { default: defaultStyles, paragraphStyles: [{ id: 'Normal', name: 'Normal', run: { font: 'Arial', size: 22 } }] },
+      sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1134, right: 1134, bottom: 1134, left: 1134 } } }, children }],
+    });
+    progress('docx', kind, 'generating');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return lib.Packer.toBlob(doc);
+  }
+  async function pdfBlob(lib, model, kind) {
+    const lines = await paragraphs(model, 'pdf', kind);
+    const content = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const node = {
+        text: line.runs.length ? line.runs.map(run => {
+          const part = { text: run.text };
+          if (run.bold) part.bold = true;
+          if (run.italic) part.italics = true;
+          return part;
+        }) : ' ',
+        preserveLeadingSpaces: true,
+        preserveTrailingSpaces: true,
+        margin: [0, 0, 0, 0],
+      };
+      // pdfmake expands tabs to four spaces itself. No text or lines are dropped.
+      if (line.kind === 'heading') {
+        node.bold = true;
+        node.fontSize = [22, 18, 15, 13, 12, 11][Math.max(0, Math.min(5, (line.level || 1) - 1))];
+      }
+      content.push(node);
+      if (i && i % 128 === 0) {
+        progress('pdf', kind, 'preparing', i, lines.length);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    const definition = {
+      pageSize: 'A4', pageMargins: [48, 48, 48, 48],
+      defaultStyle: { font: 'Roboto', fontSize: 11, lineHeight: 1.2, color: '#111111' },
+      info: { title: '', author: '', subject: '', keywords: '', creator: '', producer: '' },
+      compress: true,
+      content,
+    };
+    const fonts = { Roboto: {
+      normal: 'Roboto-Regular.ttf', bold: 'Roboto-Medium.ttf',
+      italics: 'Roboto-Italic.ttf', bolditalics: 'Roboto-MediumItalic.ttf',
+    } };
+    progress('pdf', kind, 'generating');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('No se pudo terminar el PDF dentro del tiempo permitido. Vuelve a intentarlo.')), 180000);
+      try {
+        // pdfmake 0.2.x getBlob is callback-based, not a Promise.
+        lib.createPdf(definition, undefined, fonts).getBlob(blob => {
+          clearTimeout(timer);
+          if (!blob || typeof blob.arrayBuffer !== 'function') reject(new Error('No se pudo generar un PDF válido.'));
+          else resolve(blob);
+        });
+      } catch (error) { clearTimeout(timer); reject(error); }
+    });
+  }
+  return { validate, project, load, progress, docxBlob, pdfBlob };
+})();
+function loadTextExportLibraries(format) {
+  return textDocumentExport.load(format);
+}
+async function buildTextDocumentBlob(model, format, kind = 'anonymized') {
+  textDocumentExport.validate(format, kind);
+  try {
+    const clean = textDocumentExport.project(model);
+    let blob;
+    if (format === 'txt') blob = new Blob([clean.text], { type: 'text/plain;charset=utf-8' });
+    else if (format === 'json') {
+      const serialized = serializeTextDocument(clean, kind);
+      blob = new Blob([typeof serialized === 'string' ? serialized : JSON.stringify(serialized)], { type: 'application/json;charset=utf-8' });
+    } else {
+      textDocumentExport.progress(format, kind, 'loading');
+      const lib = await loadTextExportLibraries(format);
+      blob = format === 'docx' ? await textDocumentExport.docxBlob(lib, clean, kind) : await textDocumentExport.pdfBlob(lib, clean, kind);
+    }
+    textDocumentExport.progress(format, kind, 'complete');
+    return blob;
+  } catch (error) {
+    textDocumentExport.progress(format, kind, 'error');
+    throw error;
+  }
+}
+async function saveTextDocument(model, format, kind = 'anonymized', options = {}) {
+  const blob = await buildTextDocumentBlob(model, format, kind);
+  const canSave = options?.canSave;
+  const ensureCurrent = () => {
+    if (canSave !== undefined && (typeof canSave !== 'function' || !canSave())) {
+      throw new Error('El resultado cambió durante la preparación. Revisa el texto y vuelve a descargar.');
+    }
+  };
+  const date = new Date();
+  const day = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  const filename = (kind === 'restored' ? 'texto-restaurado-CONFIDENCIAL-' : 'texto-anonimizado-') + day + '.' + format;
+  // This guard runs AFTER all awaits, never before a potentially slow lazy-load.
+  ensureCurrent();
+  const url = URL.createObjectURL(blob);
+  let link;
+  let clicked = false;
+  try {
+    link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.rel = 'noopener';
+    if (link.style) link.style.display = 'none';
+    document.body.appendChild(link);
+    ensureCurrent();
+    link.click();
+    clicked = true;
+  } finally {
+    link?.remove();
+    if (clicked) setTimeout(() => URL.revokeObjectURL(url), 60000);
+    else URL.revokeObjectURL(url);
+  }
+  return filename;
+}
+// ─── Fin exportación textual multiformato ─────────────────────────────────────
+
 
 // ─── Plantillas de ejemplo ────────────────────────────────────────────────────
 const TEMPLATE_CATS = [
@@ -2832,6 +3739,55 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
 
 // ─── Pestaña de trabajo: texto o documento, mismo estado, mismo resultado ──────
 // ─── Ajustes compartidos entre pestañas (viven en App; se pierden al cerrar la pestaña del navegador) ───
+function TextDocumentDownload({ model, kind = 'anonymized', enabled = true, blockedMessage = '' }) {
+  const dialogs = useDialog();
+  const [format, setFormat] = useState('docx');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const current = useRef(null);
+  current.current = { model, enabled };
+  const mounted = useRef(false);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  React.useEffect(() => { setMessage(''); }, [model]);
+  const download = async () => {
+    if (!model || !enabled || busy) return;
+    if (kind === 'restored' && !(await dialogs.confirm('Este documento vuelve a contener datos reales. Guárdalo en una ubicación privada. ¿Quieres descargarlo?', { ok: 'Descargar documento restaurado', danger: true }))) return;
+    const snapshot = model;
+    if (!mounted.current || current.current?.model !== snapshot || !current.current.enabled) return;
+    setBusy(true); setMessage('Preparando el documento completo…');
+    try {
+      await saveTextDocument(snapshot, format, kind, { canSave: () => mounted.current && current.current?.model === snapshot && current.current.enabled });
+      setMessage('Descarga preparada. Revisa la carpeta de descargas de tu navegador.');
+    } catch (error) { setMessage('No se pudo preparar la descarga.'); dialogs.alert(error.message || 'Vuelve a intentarlo.', 'No se pudo descargar'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section data-document-download={kind} className="rounded-2xl border border-[#d4d4d4] bg-white p-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0 max-w-2xl">
+          <h3 className="font-bold text-[#222222]">{kind === 'restored' ? 'Descarga el texto restaurado' : 'Descarga el texto anonimizado'}</h3>
+          <p className="mt-1 text-xs leading-relaxed text-[#555555]">{kind === 'restored' ? 'Este documento contiene datos reales. Trátalo como información confidencial.' : 'Incluye el texto procesado, sin la llave ni la tabla de datos originales. Revisa siempre qué información sigue visible.'}</p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label htmlFor={kind + '-download-format'} className="mb-1 block text-xs font-semibold text-[#333333]">Formato</label>
+            <select id={kind + '-download-format'} value={format} onChange={e => setFormat(e.target.value)} disabled={busy}
+              aria-label={'Formato de descarga del texto ' + (kind === 'restored' ? 'restaurado' : 'anonimizado')}
+              className="min-h-[44px] rounded-xl border border-[#9a9a9a] bg-white px-3 text-sm text-[#222222] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]">
+              <option value="docx">Word (.docx)</option><option value="pdf">PDF (.pdf)</option><option value="txt">Texto (.txt)</option><option value="json">JSON (.json)</option>
+            </select>
+          </div>
+          <AppButton onClick={download} disabled={!enabled || !model || busy}>{busy ? 'Preparando…' : kind === 'restored' ? 'Descargar documento restaurado' : 'Descargar documento'}</AppButton>
+        </div>
+      </div>
+      {!enabled ? <p className="mt-2 text-xs text-[#78350f]">{blockedMessage}</p> : null}
+      <p className="mt-2 text-xs leading-relaxed text-[#555555]">Word y PDF contienen el texto con formato de lectura. Se conserva la estructura textual recuperable, pero no imágenes, gráficos, firmas ni el diseño o la paginación originales.</p>
+      <p className="mt-1 text-xs text-[#555555]" role="status" aria-live="polite">{message}</p>
+    </section>
+  );
+}
+
+
 function useSettings() {
   const [cats, setCats] = useState(CATS.map(c => Object.assign({}, c)));
   const [customTerms, setCustomTerms] = useState('');
@@ -2860,7 +3816,7 @@ function SettingsTab({ settings, onDone }) {
   return (
     <div className="space-y-6">
       <LiveStatus message={status} />
-      <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] px-6 py-5">
+      <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] px-6 py-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 max-w-2xl">
             <h2 className="text-xl font-bold text-[#222222]">Decide qué información quieres ocultar</h2>
@@ -2874,6 +3830,17 @@ function SettingsTab({ settings, onDone }) {
       <p className="text-xs text-[#6b6b6b]" data-settings-counts>Ahora mismo: {active} {active === 1 ? 'tipo activo' : 'tipos activos'}{hiddenWords ? ', ' + hiddenWords + (hiddenWords === 1 ? ' palabra que siempre se oculta' : ' palabras que siempre se ocultan') : ''}{visibleWords ? ', ' + visibleWords + (visibleWords === 1 ? ' palabra que queda visible' : ' palabras que quedan visibles') : ''}.</p>
       {onDone ? <div data-settings-next className="flex justify-end"><AppButton onClick={onDone}>Ir a Anonimizar texto →</AppButton></div> : null}
     </div>
+  );
+}
+
+function SessionCareNote({ id }) {
+  return (
+    <aside role="note" aria-labelledby={id + '-title'} data-session-care className="mt-4 border-t border-[#e0c8cd] pt-3 text-sm leading-relaxed text-[#444444]">
+      <h3 id={id + '-title'} className="font-semibold text-[#222222]">Tu trabajo no se guarda automáticamente</h3>
+      <p className="mt-1">El texto, el resultado y la llave se mantienen en memoria y se pierden al recargar o cerrar esta página.</p>
+      <p className="mt-1">Descarga el resultado que quieras conservar. Guarda el documento anonimizado y su llave confidencial en archivos separados. No envíes la llave a una IA.</p>
+      <p className="mt-1 text-xs text-[#555555]">«Borrar sesión» no elimina las descargas ni el portapapeles.</p>
+    </aside>
   );
 }
 
@@ -2897,9 +3864,12 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
   const [viewerData, setViewerData] = useState(null);
   const [keySaved, setKeySaved] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [sourceDocument, setSourceDocument] = useState(null);
   const viewerGeneration = useRef(0);
   const outputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const fileReadGeneration = useRef(0);
+  React.useEffect(() => () => { fileReadGeneration.current++; }, []);
   const announce = message => { setStatus(''); setTimeout(() => setStatus(message), 30); };
 
   const activeCats = cats.filter(c => c.on);
@@ -2922,39 +3892,50 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
 
   const loadTemplate = async (template) => {
     if (inputText && !(await dialogs.confirm('¿Reemplazar el texto actual con la plantilla «' + template.name + '»?', { ok: 'Reemplazar' }))) return;
-    setInputText(template.text); setSourceName(null); invalidate(); setShowTemplates(false);
+    setInputText(template.text); setSourceName(null); setSourceDocument(null); invalidate(); setShowTemplates(false);
     settings.setCatsForTemplate(template.cats);
     announce('Plantilla cargada: ' + template.name);
   };
 
   const clear = async () => {
     if (!(await dialogs.confirm('¿Borrar el texto y el resultado? Si no guardaste la llave de recuperación, no podrás recuperar los originales.', { ok: 'Borrar', danger: true }))) return;
-    setInputText(''); setSourceName(null); invalidate(); setLastResult(null); setViewerData(null);
+    setInputText(''); setSourceName(null); setSourceDocument(null); invalidate(); setLastResult(null); setViewerData(null);
     announce('Texto y resultado borrados.');
   };
 
   const handleFile = async (file) => {
     if (!file) return;
+    const generation = ++fileReadGeneration.current;
+    const isCurrent = () => fileReadGeneration.current === generation;
     setUploading(true); setUploadMsg('Procesando archivo…');
     try {
-      const text = await extractTextFromFile(file, msg => { setUploadMsg(msg); });
+      const importedDocument = await readTextDocumentFile(file, msg => { if (isCurrent()) setUploadMsg(msg); });
+      if (!isCurrent()) return;
+      const text = importedDocument.text;
       if (!text.trim()) throw new Error('No se pudo extraer texto del archivo. ¿Está protegido con contraseña o es un PDF escaneado (solo imágenes)?');
-      setInputText(text); setSourceName(file.name); invalidate(); setUploadMsg('');
+      setInputText(text); setSourceName(file.name); setSourceDocument(importedDocument); invalidate(); setUploadMsg('');
       announce('Archivo cargado: ' + file.name + ', ' + text.length.toLocaleString() + ' caracteres.');
     } catch (err) {
-      setUploadMsg('');
-      dialogs.alert(err.message, 'No se pudo leer el archivo');
-    } finally { setUploading(false); }
+      if (!isCurrent()) return;
+      setUploadMsg(''); dialogs.alert(err.message, 'No se pudo leer el archivo');
+    } finally { if (isCurrent()) setUploading(false); }
   };
 
   const anonymize = () => {
     if (!inputText.trim()) return;
     if (activeCats.length === 0 && !hasCustomTerms) { dialogs.alert('Activa al menos una categoría o añade términos a ocultar antes de procesar.'); return; }
-    const r = runAnonymize(inputText, activeCats, customTerms, { whitelist });
-    setResult(r); setKeySaved(false);
-    if (setLastResult) setLastResult(r);
-    announce('Listo: ' + r.reps.length + ' datos sustituidos. Revisa el resultado antes de copiarlo.');
-    setTimeout(() => outputRef.current && outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    try {
+      const sourceModel = sourceDocument && sourceDocument.text === inputText ? sourceDocument : makeTextDocument(inputText);
+      const r = runAnonymize(inputText, activeCats, customTerms, { whitelist });
+      r.document = remapTextDocument(sourceModel, r.out, r.edits);
+      setResult(r); setKeySaved(false);
+      if (setLastResult) setLastResult(r);
+      announce('Listo: ' + r.reps.length + ' datos sustituidos. Revisa el resultado antes de copiarlo.');
+      setTimeout(() => outputRef.current && outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    } catch (error) {
+      invalidate(); announce('No se pudo anonimizar el documento.');
+      dialogs.alert(error.message || 'No se pudo preparar el documento. Prueba con un archivo más pequeño.', 'No se pudo anonimizar');
+    }
   };
 
   const excludeFromResult = (rep) => {
@@ -2969,7 +3950,13 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
   };
 
   const riskData = useMemo(() => result ? computeResidualRisk(result.out, activeIds, { whitelist }) : null, [result, activeIds.join(','), whitelist]);
-  const canExport = !!(result && riskData && riskData.hits.length === 0 && reviewed);
+  // Palabras autorizadas que solo cubren parte de un dato: el dato se oculta
+  // igual, pero el usuario debe saber por qué el resultado sale troceado.
+  const splitTerms = useMemo(
+    () => result ? splittingWhitelistTerms(inputText, whitelist, activeCats) : [],
+    [result, inputText, whitelist, activeIds.join(',')]
+  );
+  const canExport = !!(!uploading && result && riskData && riskData.hits.length === 0 && reviewed);
 
   const copyOutput = (withInstruction) => {
     if (!canExport) return;
@@ -3000,7 +3987,7 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
     if (!canExport) return;
     const riskInfo = getRiskInfo(riskData.score);
     const effectiveActiveCats = [...activeCats, ...(hasCustomTerms ? [CUSTOM_CAT] : [])];
-    downloadCombinedDoc({ anonText: result.out, reps: result.reps, cats: allCats, activeCats: effectiveActiveCats, riskScore: riskData.score, riskLabel: riskInfo.label, reviewed, timestamp: new Date().toLocaleString('es'), originalLen: inputText.length,
+    downloadCombinedDoc({ anonText: result.out, reps: result.reps, cats: allCats, activeCats: effectiveActiveCats, whitelist, riskScore: riskData.score, riskLabel: riskInfo.label, reviewed, timestamp: new Date().toLocaleString('es'), originalLen: inputText.length,
       confirm: m => dialogs.confirm(m, { ok: 'Descargar respaldo', danger: true }) }).then(done => { if (done) setKeySaved(true); });
   };
 
@@ -3014,7 +4001,7 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
   const handleDrop = (e) => { e.preventDefault(); setDragOver(false); const file = e.dataTransfer.files && e.dataTransfer.files[0]; if (file) handleFile(file); };
   const totalDetected = result ? result.reps.length : 0;
   const byCategory = result ? allCats.map(c => Object.assign({}, c, { count: result.reps.filter(r => r.catId === c.id).reduce((s, r) => s + (r.count || 1), 0) })).filter(c => c.count > 0) : [];
-  const fileAccept = ".txt,.csv,.pdf,.doc,.docx,text/plain,text/csv,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const fileAccept = ".txt,.csv,.pdf,.doc,.docx,.json,text/plain,text/csv,application/json,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
   return (
     <div className="space-y-6">
@@ -3022,15 +4009,16 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
       {showTemplates ? <TemplatesPanel onSelect={loadTemplate} onClose={() => setShowTemplates(false)} /> : null}
 
       {/* Bloque 1 — arranque: qué es esto y cómo probarlo sin arriesgar nada */}
-      <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fafafa] px-6 py-5" aria-labelledby="start-title">
+      <section className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] px-6 py-5" aria-labelledby="start-title">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0 max-w-2xl">
             <h2 id="start-title" className="text-lg font-bold text-[#222222]">Pásalo por aquí antes de pegarlo en una IA</h2>
-            <p className="mt-1 text-sm text-[#444444]">Cambiamos nombres, teléfonos, cuentas y claves por etiquetas. Luego los recuperas. Nada sale de tu navegador.</p>
+            <p className="mt-1 text-sm text-[#444444]">Cambiamos los datos seleccionados por etiquetas y puedes restaurarlos con su llave. El documento se procesa en tu navegador.</p>
             <p className="mt-1 text-xs text-[#6b6b6b]">Prueba primero con un ejemplo: 50 textos con datos inventados, por área.</p>
           </div>
           <AppButton variant="secondary" className="border-[#222222]" onClick={() => setShowTemplates(true)} disabled={uploading}>Cargar un ejemplo</AppButton>
         </div>
+        <SessionCareNote id="work-session-note" />
       </section>
 
       {/* Bloque 2 — tu texto */}
@@ -3042,19 +4030,20 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
             <AppButton variant="secondary" disabled={uploading} onClick={() => fileInputRef.current && fileInputRef.current.click()} aria-describedby="file-limits">
               {uploading ? '⏳ Procesando…' : '↑ Subir archivo'}
             </AppButton>
-            <span id="file-limits" className="text-xs text-[#6b6b6b]">PDF, Word, TXT o CSV · hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas</span>
+            <span id="file-limits" className="text-xs text-[#6b6b6b]">PDF, Word, TXT, CSV o JSON · hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas</span>
             <input ref={fileInputRef} type="file" accept={fileAccept} className="hidden" aria-label="Seleccionar archivo"
               onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
             {inputText ? <AppButton variant="secondary" onClick={clear} disabled={uploading}>Limpiar</AppButton> : null}
           </div>
         </div>
+        <p className="mb-3 text-sm leading-relaxed text-[#555555]" id="text-scope-note"><strong>Esta herramienta trabaja con el texto de tu documento.</strong> Sustituye los datos seleccionados por etiquetas. No reproduce imágenes, gráficos, firmas ni el diseño original del archivo. Si editas el contenido en este cuadro, se conserva como texto sin formato.</p>
         <textarea id="input-text"
           className={cn("w-full rounded-2xl border bg-white p-4 font-mono text-base sm:text-sm text-[#222222] outline-none transition resize-y focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020]",
             dragOver ? 'border-[#b00020] bg-[#fff5f6]' : 'border-[#9a9a9a]')}
-          rows={12} value={inputText}
-          onChange={e => { setInputText(e.target.value); setSourceName(null); invalidate(); }}
+          rows={12} value={inputText} readOnly={uploading}
+          onChange={e => { setInputText(e.target.value); setSourceName(null); setSourceDocument(null); invalidate(); }}
           placeholder="Pega aquí lo que vas a enviar a ChatGPT, Claude o Gemini, o arrastra un archivo."
-          aria-label="Texto a procesar" />
+          aria-label="Texto a procesar" aria-describedby="text-scope-note" />
         {sourceName ? <p className="mt-2 text-xs text-[#6b6b6b]">Archivo: {sourceName} · puedes editar el texto extraído antes de continuar.</p> : null}
         {uploading && uploadMsg ? (
           <div className="mt-3 flex items-center gap-3 rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] px-4 py-3 text-sm text-[#1d4ed8]" role="status">
@@ -3077,7 +4066,8 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
       {result ? (
         <div ref={outputRef} className="space-y-4" style={{ scrollMarginTop: '130px' }}>
           <h2 className="sr-only">Resultado</h2>
-          <RiskSemaphore text={result.out} reviewed={reviewed} onReview={setReviewed} riskData={riskData} />
+          <RiskSemaphore text={result.out} reviewed={reviewed} onReview={setReviewed} riskData={riskData} splitTerms={splitTerms} />
+          <TextDocumentDownload model={result.document} enabled={canExport} blockedMessage={riskData.hits.length ? 'Primero retira los datos pendientes y vuelve a procesar.' : 'Para descargar: marca arriba «Revisé el texto…».'} />
 
           <section className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6" aria-labelledby="output-title">
             <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
@@ -3124,7 +4114,6 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
               <span className="text-xs text-[#6b6b6b]">{canExport ? '«Copiar para pegar en la IA» añade una instrucción para que el modelo conserve las etiquetas.' : riskData.hits.length ? 'Para copiar: primero retira los datos que quedan por ocultar.' : 'Para copiar: marca arriba «Revisé el texto…».'}</span>
               <div className="flex gap-2 flex-wrap">
                 <AppButton variant="secondary" onClick={() => copyOutput(false)} disabled={!canExport}>Copiar solo el texto</AppButton>
-                <AppButton variant="secondary" onClick={() => canExport && downloadAnonText(result.out)} disabled={!canExport}>Descargar .txt</AppButton>
                 <AppButton onClick={() => copyOutput(true)} disabled={!canExport}>{copied ? '✓ Copiado' : 'Copiar para pegar en la IA'}</AppButton>
               </div>
             </div>
@@ -3144,7 +4133,7 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
                 </div>
               </div>
               {!canExport ? <p className="mb-2 text-xs text-[#6b6b6b]">El Word con los originales se activa al marcar arriba «Revisé el texto…».</p> : null}
-              <p className="mb-3 text-xs text-[#6b6b6b]">La llave contiene los datos reales. Guárdala con el documento y nunca la pegues en una IA.</p>
+              <p className="mb-3 text-xs text-[#6b6b6b]">La llave contiene los datos reales. Guárdala por separado del documento que compartas y nunca la pegues en una IA.</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Equivalencias entre etiquetas y datos originales</caption>
@@ -3190,8 +4179,20 @@ function RecoverTab({ lastResult }) {
   const [modifiedText, setModifiedText] = useState('');
   const [recovered, setRecovered] = useState(null);
   const [copiedRecover, setCopiedRecover] = useState(false);
+  const [modifiedDocument, setModifiedDocument] = useState(null);
+  const [documentName, setDocumentName] = useState('');
+  const [loadingDocument, setLoadingDocument] = useState(false);
+  const [documentLoadMessage, setDocumentLoadMessage] = useState('');
+  const documentInputRef = useRef(null);
   const [status, setStatus] = useState('');
   const keyInputRef = useRef(null);
+  // Toda lectura asíncrona de esta pestaña lleva guarda de generación: una
+  // lectura obsoleta no debe sustituir el documento ni la llave vigentes,
+  // porque se restauraría y descargaría el archivo equivocado con datos
+  // reales. Se invalidan todas al desmontar.
+  const documentReadGeneration = useRef(0);
+  const keyReadGeneration = useRef(0);
+  useEffect(() => () => { documentReadGeneration.current++; keyReadGeneration.current++; }, []);
 
   const buildMapping = () => {
     if (mode === 'auto' && lastResult && lastResult.reps) { const map = {}; for (const r of lastResult.reps) map[r.replacement] = r.original; return map; }
@@ -3201,8 +4202,35 @@ function RecoverTab({ lastResult }) {
 
   const loadKeyFile = async (file) => {
     if (!file) return;
-    try { const text = await file.text(); setMappingText(text.replace(/^\uFEFF/, '')); setMode('paste'); setRecovered(null); setStatus('Llave cargada: ' + file.name); }
-    catch (e) { dialogs.alert('No se pudo leer el archivo de llave.'); }
+    const generation = ++keyReadGeneration.current;
+    const isCurrent = () => keyReadGeneration.current === generation;
+    try {
+      const text = await file.text();
+      if (!isCurrent()) return;
+      setMappingText(text.replace(/^\uFEFF/, '')); setMode('paste'); setRecovered(null); setStatus('Llave cargada: ' + file.name);
+    }
+    catch (e) {
+      if (!isCurrent()) return;
+      dialogs.alert('No se pudo leer el archivo de llave.');
+    }
+  };
+
+  const loadRestorationDocument = async file => {
+    if (!file) return;
+    const generation = ++documentReadGeneration.current;
+    const isCurrent = () => documentReadGeneration.current === generation;
+    setLoadingDocument(true); setDocumentLoadMessage('Leyendo el documento completo…');
+    try {
+      const imported = await readTextDocumentFile(file, message => { if (isCurrent()) setDocumentLoadMessage(message); });
+      if (!isCurrent()) return;
+      if (!imported.text.trim()) throw new Error('El archivo no contiene texto.');
+      setModifiedText(imported.text); setModifiedDocument(imported); setDocumentName(file.name); setRecovered(null);
+      setStatus('Documento cargado: ' + file.name + '. Ya puedes restaurar con su llave.');
+    } catch (error) {
+      if (!isCurrent()) return;
+      dialogs.alert(error.message, 'No se pudo cargar el documento');
+    }
+    finally { if (isCurrent()) { setLoadingDocument(false); setDocumentLoadMessage(''); } }
   };
 
   const recover = () => {
@@ -3211,46 +4239,51 @@ function RecoverTab({ lastResult }) {
     try { mapping = buildMapping(); }
     catch (error) { setRecovered(null); dialogs.alert(error.message, 'No se pudo leer la llave'); return; }
     if (!Object.keys(mapping).length) { dialogs.alert('No hay llave disponible. Carga el archivo de llave o pega la tabla de equivalencias.'); return; }
-    const res = restoreTags(modifiedText, mapping);
-    setRecovered(res);
-    setStatus(res.resolved.length + ' etiquetas restauradas' + (res.repaired.length ? ', ' + res.repaired.length + ' reparadas' : '') + (res.unresolved.length ? ', ' + res.unresolved.length + ' sin resolver' : '') + '.');
+    try {
+      const sourceModel = modifiedDocument && modifiedDocument.text === modifiedText ? modifiedDocument : makeTextDocument(modifiedText);
+      const res = restoreTags(modifiedText, mapping);
+      res.document = remapTextDocument(sourceModel, res.out, res.edits);
+      setRecovered(res);
+      setStatus(res.resolved.length + ' etiquetas restauradas' + (res.repaired.length ? ', ' + res.repaired.length + ' reparadas' : '') + (res.unresolved.length ? ', ' + res.unresolved.length + ' sin resolver' : '') + '.');
+    } catch (error) {
+      setRecovered(null); setStatus('No se restauró el documento.');
+      dialogs.alert((error.message || 'No se pudo preparar el resultado.') + ' Si el documento supera los límites, divídelo en archivos más pequeños. No se descargó ningún resultado parcial.', 'No se pudo restaurar');
+    }
   };
 
   const copyRecovered = () => {
-    if (!recovered) return;
+    if (!recovered || loadingDocument) return;
     copyLocalText(recovered.out, m => dialogs.alert(m)).then(ok => { if (!ok) return; setCopiedRecover(true); setTimeout(() => setCopiedRecover(false), 2000); });
   };
 
   const hasMappingSource = (mode === 'auto' && lastResult) || (mode === 'paste' && mappingText.trim());
   const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-[#fafafa] p-3 text-base sm:text-sm text-[#333333] focus:outline-none focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-y";
 
-  // Resaltar los valores restaurados en el texto recuperado.
-  const highlighted = useMemo(() => {
-    if (!recovered) return null;
-    const values = [...new Set(recovered.resolved.map(r => r.value).filter(Boolean))].sort((a, b) => b.length - a.length);
-    if (!values.length) return [recovered.out];
-    const re = new RegExp('(' + values.map(escapeRegExp).join('|') + ')', 'g');
-    return recovered.out.split(re);
-  }, [recovered]);
-  const restoredSet = useMemo(() => new Set(recovered ? recovered.resolved.map(r => r.value) : []), [recovered]);
+  // Resaltar los valores restaurados usando los intervalos exactos de la
+  // sustitución, nunca buscándolos en el texto (ver buildRestoredSegments).
+  const highlighted = useMemo(
+    () => (recovered ? buildRestoredSegments(recovered.out, recovered.edits) : null),
+    [recovered]
+  );
 
   return (
     <div className="space-y-6">
       <LiveStatus message={status} />
-      <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
+      <div className="rounded-[28px] border border-[#e5e5e5] bg-[#fff5f6] shadow-sm p-6">
         <h2 className="text-xl font-bold text-[#222222] mb-1">Restaura los datos originales en la respuesta de la IA</h2>
-        <p className="text-sm text-[#6b6b6b]">Pega lo que te contestó la IA. Cada etiqueta como <span className="font-mono">[PERSONA_1]</span> se cambia por el dato real, aunque el modelo la haya escrito distinto.</p>
+        <p className="text-sm text-[#6b6b6b]">Sube el documento con etiquetas o pega lo que te contestó la IA. Cada etiqueta como <span className="font-mono">[PERSONA_1]</span> se cambia por el dato real, aunque el modelo la haya escrito distinto.</p>
+        <SessionCareNote id="restore-session-note" />
       </div>
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
         <p className="font-bold text-[#222222] mb-3" id="key-source"><span className="text-[#6b6b6b]">1 ·</span> Elige la llave</p>
         <div className="mb-4 flex gap-3 flex-wrap" role="group" aria-labelledby="key-source">
-          <button type="button" onClick={() => { setMode('auto'); setRecovered(null); }} aria-pressed={mode === 'auto'}
+          <button type="button" onClick={() => { keyReadGeneration.current++; setMode('auto'); setRecovered(null); }} aria-pressed={mode === 'auto'}
             className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'auto' ? "border-2 border-[#222222] bg-[#fafafa] text-[#222222]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
             <div className="font-bold mb-0.5">{mode === 'auto' ? '✓ ' : ''}Usar la llave de esta sesión</div>
             <div className="text-xs font-normal text-[#6b6b6b]">{lastResult ? lastResult.reps.length + ' etiquetas de tu último texto' : 'Todavía no has ocultado nada en esta sesión'}</div>
           </button>
-          <button type="button" onClick={() => { setMode('paste'); setRecovered(null); }} aria-pressed={mode === 'paste'}
+          <button type="button" onClick={() => { keyReadGeneration.current++; setMode('paste'); setRecovered(null); }} aria-pressed={mode === 'paste'}
             className={cn("flex-1 min-w-[12rem] rounded-2xl border px-4 py-3 text-sm font-semibold transition text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]", mode === 'paste' ? "border-2 border-[#222222] bg-[#fafafa] text-[#222222]" : "border-[#9a9a9a] text-[#333333] hover:bg-[#fafafa]")}>
             <div className="font-bold mb-0.5">{mode === 'paste' ? '✓ ' : ''}Usar una llave guardada</div>
             <div className="text-xs font-normal text-[#6b6b6b]">Sube el archivo de llave o pega la tabla del Word</div>
@@ -3264,7 +4297,7 @@ function RecoverTab({ lastResult }) {
               <AppButton variant="secondary" onClick={() => keyInputRef.current && keyInputRef.current.click()}>↑ Subir archivo de llave</AppButton>
               <input ref={keyInputRef} type="file" accept=".tsv,.txt,text/tab-separated-values,text/plain" className="hidden" aria-label="Seleccionar archivo de llave" onChange={e => { loadKeyFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
             </div>
-            <textarea id="mapping-text" rows={8} value={mappingText} onChange={e => { setMappingText(e.target.value); setRecovered(null); }}
+            <textarea id="mapping-text" rows={8} value={mappingText} onChange={e => { keyReadGeneration.current++; setMappingText(e.target.value); setRecovered(null); }}
               className={cn(fieldClass, 'font-mono')} placeholder={"Etiqueta\tOriginal (JSON)\tHint\tCategoría\n[EMAIL_1]\t\"maria@empresa.com\"\t—\tCorreos electrónicos"} />
           </div>
         )}
@@ -3272,12 +4305,17 @@ function RecoverTab({ lastResult }) {
 
       <div className="rounded-[28px] border border-[#e5e5e5] bg-white shadow-sm p-6">
         <div className="mb-2 flex items-center gap-2">
-          <label htmlFor="modified-text" className="font-bold text-[#222222]"><span className="text-[#6b6b6b]">2 ·</span> Pega la respuesta de la IA</label>
+          <label htmlFor="modified-text" className="font-bold text-[#222222]"><span className="text-[#6b6b6b]">2 ·</span> Carga el documento con etiquetas o pega la respuesta de la IA</label>
+          <AppButton variant="secondary" disabled={loadingDocument} onClick={() => documentInputRef.current?.click()}>{loadingDocument ? 'Leyendo…' : 'Subir documento con etiquetas'}</AppButton>
+          <input ref={documentInputRef} type="file" accept=".pdf,.docx,.doc,.txt,.csv,.json" className="hidden" aria-label="Seleccionar documento con etiquetas" onChange={e => { loadRestorationDocument(e.target.files && e.target.files[0]); e.target.value = ''; }} />
         </div>
-        <textarea id="modified-text" rows={12} value={modifiedText} onChange={e => { setModifiedText(e.target.value); setRecovered(null); }} className={fieldClass}
+        <p className="mb-2 text-xs text-[#555555]">PDF con texto, Word (.docx), TXT, CSV o JSON de esta app · hasta {MAX_FILE_MB} MB y {MAX_PDF_PAGES} páginas en PDF. Se recupera el texto, no el diseño gráfico original.</p>
+        {documentName ? <p className="mb-2 text-xs text-[#555555]">Documento cargado: {documentName}</p> : null}
+        {documentLoadMessage ? <p className="mb-2 text-sm text-[#2A5B8C]" role="status">{documentLoadMessage}</p> : null}
+        <textarea id="modified-text" rows={12} value={modifiedText} readOnly={loadingDocument} onChange={e => { setModifiedText(e.target.value); setModifiedDocument(null); setDocumentName(''); setRecovered(null); }} className={fieldClass}
           placeholder="Pega aquí lo que te contestó ChatGPT, Claude o Gemini. Las etiquetas entre corchetes se cambiarán por los datos reales." />
         <div className="mt-3 flex items-center gap-3 flex-wrap">
-          <AppButton onClick={recover} disabled={!modifiedText.trim() || !hasMappingSource}>Recuperar datos originales</AppButton>
+          <AppButton onClick={recover} disabled={loadingDocument || !modifiedText.trim() || !hasMappingSource}>Recuperar datos originales</AppButton>
           {!modifiedText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega una respuesta para activar el botón.</span> : !hasMappingSource ? <span className="text-xs text-[#6b6b6b]">Elige una llave arriba para activar el botón.</span> : null}
         </div>
       </div>
@@ -3290,17 +4328,22 @@ function RecoverTab({ lastResult }) {
             {recovered.unresolved.length > 0 && <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#fffbeb] border border-[#b45309] px-3 py-1.5 text-sm font-semibold text-[#b45309]">⚠ {recovered.unresolved.length} sin resolver</span>}
             {recovered.resolved.length === 0 && recovered.unresolved.length === 0 && <span className="text-sm text-[#6b6b6b]">No se encontraron etiquetas en el texto.</span>}
           </div>
+          <TextDocumentDownload model={recovered.document} kind="restored" enabled={!loadingDocument} blockedMessage="Espera a que termine la lectura del documento." />
           <div>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-[#222222]">Texto recuperado</span>
-              <AppButton variant="secondary" onClick={copyRecovered}>{copiedRecover ? '✓ Copiado' : '📋 Copiar'}</AppButton>
+              <AppButton variant="secondary" onClick={copyRecovered} disabled={loadingDocument}>{copiedRecover ? '✓ Copiado' : '📋 Copiar'}</AppButton>
             </div>
             <div className="rounded-2xl border border-[#e5e5e5] bg-[#fafafa] p-4 max-h-96 overflow-y-auto">
               <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[#222222]">
-                {highlighted.map((part, i) => restoredSet.has(part) ? <mark key={i} className="rounded bg-[#dcfce7] px-0.5 text-[#14532d]">{part}</mark> : <span key={i}>{part}</span>)}
+                {highlighted.segments.map((part, i) => part.restored ? <mark key={i} className="rounded bg-[#dcfce7] px-0.5 text-[#14532d]">{part.text}</mark> : <span key={i}>{part.text}</span>)}
               </pre>
             </div>
-            <p className="mt-1.5 text-xs text-[#6b6b6b]">Los valores restaurados aparecen resaltados para que compruebes que cayeron en el lugar correcto.</p>
+            <p className="mt-1.5 text-xs text-[#6b6b6b]">
+              {highlighted.truncated
+                ? 'El texto está completo. Para que la página siga respondiendo, solo se resaltan los primeros ' + highlighted.shown.toLocaleString() + ' de ' + highlighted.total.toLocaleString() + ' datos restaurados.'
+                : 'Los valores restaurados aparecen resaltados para que compruebes que cayeron en el lugar correcto.'}
+            </p>
           </div>
           {recovered.repaired.length > 0 && (
             <details className="rounded-2xl border border-[#bfdbfe] bg-[#eff6ff] p-4 text-sm text-[#1e3a8a]">
@@ -3342,6 +4385,19 @@ function App() {
     setLastResult(null); setSessionKey(key => key + 1); settings.reset(); setTab('how'); setAboutOpen(false); setMenuOpen(false);
   };
   const tabRefs = useRef([]);
+  React.useLayoutEffect(() => {
+    const revealSelectedTab = () => {
+      const button = tabRefs.current[TABS.findIndex(t => t.id === tab)];
+      const track = button && button.parentElement;
+      if (!track || track.scrollWidth <= track.clientWidth) return;
+      const r = button.getBoundingClientRect(), parent = track.getBoundingClientRect();
+      const target = track.scrollLeft + r.left + r.width / 2 - parent.left - track.clientWidth / 2;
+      track.scrollLeft = Math.max(0, Math.min(track.scrollWidth - track.clientWidth, target));
+    };
+    revealSelectedTab();
+    window.addEventListener('resize', revealSelectedTab);
+    return () => window.removeEventListener('resize', revealSelectedTab);
+  }, [tab]);
   // Header y nav en un solo bloque sticky: así ninguna pestaña se dibuja sobre el contenido al variar la altura del header.
   const onTabKey = (e, i) => {
     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
@@ -3395,6 +4451,7 @@ function App() {
             </button>
           ))}
         </div>
+        <p id="tabs-mobile-help" className="px-5 pb-2 text-xs text-[#555555] sm:hidden">Desliza la barra para ver todas las secciones.</p>
       </nav>
       </div>
 

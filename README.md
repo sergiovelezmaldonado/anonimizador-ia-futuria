@@ -1,5 +1,7 @@
 # Anonimizador IA — FuturIA (App 7)
 
+> **Candidata de producción en preparación (2026-10-22), aún no aprobada.** Consulta `RELEASE-CHECKLIST.md`. Los conteos históricos siguientes no certifican esta candidata.
+
 > **Fase 0 y organización aprobada (2026-10-21): 253/253 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
 
 Oculta datos sensibles de la información de tu empresa **antes** de pegarla en ChatGPT,
@@ -11,6 +13,10 @@ Es gratuita, sin cuenta ni pago, y lo seguirá siendo.
 **El procesamiento del texto es 100% local**: ocurre en el navegador y no genera
 ninguna petición de red. Lo que sí requiere internet es la carga inicial de la
 app (React, Babel, Tailwind y la fuente desde CDN), así que sin conexión no arranca.
+
+## Cabeceras de apertura — 2026-10-22
+
+Por petición de Sergio, el bloque inicial de Ajustes, Anonimizar texto y Restaurar datos originales usa el mismo fondo rojo suave `#fff5f6` que «Por qué anonimizar antes de usar una IA» en Cómo usar. Solo cambian esos tres fondos: contenido, orden, plegables, formularios y botones permanecen iguales. Cambio local, sin deploy público. Verificación específica: 26/26 aserciones CDP a 1366 y 360 px, más 17/17 pruebas Node relacionadas; capturas en `pruebas/capturas-cabeceras/`. Esto no acredita el cierre del bloque documental pendiente ni de sus tres hallazgos técnicos; tampoco corrige la navegación móvil recortada ya registrada.
 
 ## Organización de la interfaz aprobada
 
@@ -138,3 +144,10 @@ python pruebas/generar-pdf-parrafos.py pruebas/prueba-parrafos.pdf
 ### Ajustes y preparación de documentos (2026-10-21)
 
 La matriz se titula «Selecciona qué tipos de datos anonimizar» y usa color por categoría (casilla, nombre, borde y fondo suave al seleccionar). Claves y contraseñas vienen activas por precaución, pero ahora son editables con explicación y advertencia al desmarcarlas; probado que desactivarlas conserva el dato y reactivarlas vuelve a sustituirlo. Ambos campos personalizados muestran 12 líneas desde el inicio y crecen hasta 24; placeholders con contraste mejorado. Se añaden intervalos de sustitución a los resultados del motor para permitir remapear estilos sin duplicar originales. La descarga multiformato todavía está en desarrollo y no se declara entregada en esta tanda.
+
+
+## Aviso de conservación y cierre técnico — 2026-10-22
+
+Nota visible «Tu trabajo no se guarda automáticamente» dentro del bloque inicial de Anonimizar texto y Restaurar datos originales. Explica memoria temporal y pérdida al recargar/cerrar; recomienda descargar el resultado, guardar documento anonimizado y llave confidencial en archivos separados y no enviar la llave a una IA. Aclara que Borrar sesión no elimina descargas ni portapapeles. Guía de seguridad sincronizada. Verificación de aviso/sesión 24/24 a 1366/360 px, incluida pérdida real del texto al recargar y almacenamiento web vacío. No se añadió persistencia.
+
+Cierre de producción autorizado por Sergio, todavía EN CURSO: carreras de carga y manejo de fallos de preparación corregidos (6/6 regresiones); navegación revela la pestaña activa completa (17/17); mensajes de confianza sin garantías absolutas revisados (4/4). Flujo de archivos reales y 200 páginas pasó 35/35 y se validaron 16 descargas. Quedan integración del motor de restauración endurecido, build/auditoría, suite final del mismo artefacto, revisión independiente y prueba de móvil físico. No hay aprobación ni publicación pública. Seguimiento en RELEASE-CHECKLIST.md del repo; no sustituirlo por cifras de una suite anterior.

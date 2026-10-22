@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+const h=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
+const part=(a,b)=>h.slice(h.indexOf(a),h.indexOf(b));
+test('la guía no promete utilidad idéntica de la IA ni exposición cero garantizada',()=>{const s=part('function HowToTab','// ─── Pestaña Privacidad');assert.ok(!s.includes('La IA funciona igual sin los datos reales'));assert.ok(!s.includes('Nadie fuera de tu equipo ve la información real.'));assert.match(s,/revisa.*contexto|contexto.*revisa/i);});
+test('la guía no presenta una obligación legal uniforme para países diferentes',()=>{const s=part('function HowToTab','// ─── Pestaña Privacidad');assert.ok(!s.includes('La ley te obliga'));assert.ok(!s.includes('exigen tratar los datos personales'));assert.match(s,/políticas.*empresa|empresa.*políticas/i);});
+test('la privacidad distingue ausencia de analítica incorporada de registros técnicos del alojamiento',()=>{const s=part('function PrivacyTab','// ─── Modelo de documentos textuales');assert.match(s,/alojamiento/);assert.match(s,/registros técnicos/);assert.ok(!s.includes('ni en qué momentos.'));});
+test('el tutorial ordena conservar la llave separada del archivo que se envía a IA',()=>{const s=part('function HowToTab','// ─── Pestaña Privacidad');assert.ok(!s.includes('Guárdala junto al documento.'));assert.match(s,/ubicación privada.*separada/);});
