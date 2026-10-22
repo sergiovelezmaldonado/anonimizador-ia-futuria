@@ -11,6 +11,9 @@ __pycache__/
 # verifica con npm run verify, así que no se versiona.
 dist/
 scripts/reports/
-vendor/mammoth-browser/mammoth.browser.min.js
+# El bundle de vendor/ SÍ se versiona a propósito: son los bytes exactos que
+# se auditaron y cuyo hash verifica el paquete. Regenerarlo en el alojamiento
+# podría producir bytes distintos de los aprobados, y sin él el build falla
+# en un clon limpio (así se cayó el despliegue de 31de6a7).
 
 .vercel

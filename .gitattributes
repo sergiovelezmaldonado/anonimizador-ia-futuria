@@ -1,0 +1,18 @@
+# Los artefactos cuyo hash verifica el paquete viajan como bytes exactos: si
+# Git normaliza sus finales de línea, el clon del alojamiento produce un hash
+# distinto del aprobado y la verificación falla (o, peor, pasa sobre bytes que
+# nadie auditó).
+vendor/** -text
+*.min.js -text
+*.png binary
+*.pdf binary
+*.docx binary
+
+# El código y los documentos sí se normalizan a LF en el repositorio.
+*.mjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
