@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const runs = [];
 const commands = [
-  ['motor, revisión y servidores', ['--test', '--test-reporter=tap', 'pruebas/test-seguridad.mjs', 'pruebas/test-fase0-motor.mjs', 'pruebas/test-servidor.mjs', 'pruebas/test-correcciones-ui.mjs', 'pruebas/test-servidor-aislado.mjs']],
+  ['motor, revisión y servidores', ['--test', '--test-reporter=tap', 'pruebas/test-seguridad.mjs', 'pruebas/test-fase0-motor.mjs', 'pruebas/test-servidor.mjs', 'pruebas/test-correcciones-ui.mjs', 'pruebas/test-servidor-aislado.mjs', 'pruebas/test-document-edits.mjs']],
   ['regresión general', ['pruebas/sonda-app.mjs']],
   ['Fase 0: flujo, diálogos, popovers, móvil', ['pruebas/sonda-fase0.mjs']],
   ['extracción y límites', ['pruebas/sonda-correccion.mjs']],

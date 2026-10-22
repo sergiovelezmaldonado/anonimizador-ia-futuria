@@ -45,7 +45,7 @@ check('en Ajustes, campos de palabras propias visibles al desplegar', await ev(`
 const termsH = await ev(`document.querySelector('#custom-terms').getBoundingClientRect().height`);
 check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto=' + termsH);
 check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
-check('títulos de Ajustes explican cada bloque', await ev(`/Selecciona qué tipos de datos ocultar/.test(document.body.innerText) && /Personaliza palabras para anonimizar o dejar visibles/.test(document.body.innerText) && /Oculta siempre estas palabras/.test(document.body.innerText) && /Deja visibles estas palabras/.test(document.body.innerText)`));
+check('títulos de Ajustes explican cada bloque', await ev(`/Selecciona qué tipos de datos anonimizar/.test(document.body.innerText) && /Personaliza palabras para anonimizar o dejar visibles/.test(document.body.innerText) && /Oculta siempre estas palabras/.test(document.body.innerText) && /Deja visibles estas palabras/.test(document.body.innerText)`));
 // Un cambio en Ajustes deja obsoleto el resultado de la pestaña de trabajo
 await ev(`[...document.querySelectorAll('#cats-body input[type=checkbox]')].find(b=>!b.checked && !b.disabled).click()`); await pause(200);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(400);

@@ -1,6 +1,6 @@
 # Anonimizador IA — FuturIA (App 7)
 
-> **Fase 0 y organización aprobada (2026-10-21): 245/245 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
+> **Fase 0 y organización aprobada (2026-10-21): 253/253 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
 
 Oculta datos sensibles de la información de tu empresa **antes** de pegarla en ChatGPT,
 Claude, Gemini o cualquier otro modelo. El reemplazo es reversible: cada dato
@@ -15,7 +15,7 @@ app (React, Babel, Tailwind y la fuente desde CDN), así que sin conexión no ar
 ## Organización de la interfaz aprobada
 
 - **Cómo usar** sigue siendo la pestaña inicial. Solo «Por qué anonimizar antes de usar una IA» se muestra abierto. Debajo, como bloques independientes inicialmente plegados: «Tu texto no sale de tu navegador», «Cómo usar el Anonimizador IA» (seis pasos verticales), «Qué tipos de datos detecta» y «Glosario».
-- **Ajustes** ofrece una introducción visible y dos bloques inicialmente plegados con explicación visible: «Selecciona qué tipos de datos ocultar» y **«Personaliza palabras para anonimizar o dejar visibles»** (título literal elegido por Sergio). Al desplegar el segundo aparecen los dos campos con sus ejemplos. Los valores sobreviven al plegado y al cambio de pestaña, no a una recarga del navegador.
+- **Ajustes** ofrece una introducción visible y dos bloques inicialmente plegados con explicación visible: «Selecciona qué tipos de datos anonimizar» y **«Personaliza palabras para anonimizar o dejar visibles»** (título literal elegido por Sergio). Al desplegar el segundo aparecen los dos campos con sus ejemplos. Los valores sobreviven al plegado y al cambio de pestaña, no a una recarga del navegador.
 - **Anonimizar texto** conserva una sola entrada a los ejemplos: «Cargar un ejemplo», que abre el selector. Tipos y palabras propias permanecen en Ajustes; el resultado ofrece el atajo «Ocultar también».
 - **Restaurar datos originales** y **Privacidad** completan la navegación. Cambiar Ajustes invalida el resultado anterior y conserva el texto.
 - La nueva sonda pruebas/sonda-organizacion.mjs prueba plegado, orden, título literal, campos, conservación y foco al escribir, selector de ejemplos y ausencia de desborde a 360 px. Capturas de los estados en pruebas/capturas-organizacion/.
@@ -24,7 +24,7 @@ app (React, Babel, Tailwind y la fuente desde CDN), así que sin conexión no ar
 
 «Empezar ahora» queda después del glosario, al final de Cómo usar, alineado a la derecha. «Ir a Anonimizar texto» queda al final de Ajustes, después de palabras personalizadas, también a la derecha y visible con los bloques plegados.
 
-Los tipos se seleccionan en una tabla de cuatro columnas: **Ocultar** (casilla), **Tipo de dato**, **Qué se oculta** y **Ejemplo**. Una fila por tipo, orden estable, claves siempre activas. Sustituye a las píldoras de categorías por petición explícita de Sergio. En móvil solo la tabla se desplaza horizontalmente; la página no desborda.
+Los tipos se seleccionan en una tabla de cuatro columnas: **Ocultar** (casilla), **Tipo de dato**, **Qué se oculta** y **Ejemplo**. Una fila por tipo, orden estable, claves activas por defecto y editables. Sustituye a las píldoras de categorías por petición explícita de Sergio. En móvil solo la tabla se desplaza horizontalmente; la página no desborda.
 
 El botón que ejecuta la transformación se llama **«Anonimizar documento»**, tanto para texto pegado como para archivos subidos. Se habilita cuando hay contenido válido y termina la carga. El paso a paso y las sondas usan el mismo nombre. «Personaliza palabras para anonimizar o dejar visibles» no cambió. El nombre de la pestaña «Cómo usar» sigue pendiente de elección; no se renombró.
 
@@ -91,10 +91,10 @@ node pruebas/sonda-app.mjs              # 30 · regresión general
 node pruebas/sonda-fase0.mjs            # 41 · Fase 0: flujo, diálogos, popovers, móvil
 node pruebas/sonda-correccion.mjs       # 13 · saltos de línea y límites de carga
 node pruebas/sonda-interfaz.mjs         # 24 · tamaños y ventana emergente
-node pruebas/sonda-organizacion.mjs     # 26 · plegables y organización aprobada
+node pruebas/sonda-organizacion.mjs     # 32 · plegables y organización aprobada
 ```
 
-**245 comprobaciones verificadas el 2026-10-21**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
+**253 comprobaciones verificadas el 2026-10-21**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
 pinneadas, Tailwind efectivamente aplicado, el flujo completo de anonimización,
 que ningún dato crudo quede en el bloque de salida, que la tabla de equivalencias
 sí conserve los originales (reversibilidad), que no haya peticiones a ningún
@@ -133,3 +133,8 @@ python pruebas/generar-pdf-parrafos.py pruebas/prueba-parrafos.pdf
 - Las sondas de navegador usan Chrome headless en el puerto **9334** (no 9333). Si `ejecutar-qa.mjs` falla con `fetch failed` en la primera sonda, falta ese Chrome, no el servidor.
 - PDF: `isEvalSupported: false`, mitigación recomendada por el advisory oficial de Mozilla `GHSA-wgrm-67xf-hhpq`; los recursos del documento se liberan después de extraer texto. Esto no equivale a una auditoría de todas las dependencias.
 - Pendiente: QA en móvil real, despliegue público (no realizado), cobertura de nombres más allá de contextos y un paquete completamente offline. No hay OCR ni históricos automáticos.
+
+
+### Ajustes y preparación de documentos (2026-10-21)
+
+La matriz se titula «Selecciona qué tipos de datos anonimizar» y usa color por categoría (casilla, nombre, borde y fondo suave al seleccionar). Claves y contraseñas vienen activas por precaución, pero ahora son editables con explicación y advertencia al desmarcarlas; probado que desactivarlas conserva el dato y reactivarlas vuelve a sustituirlo. Ambos campos personalizados muestran 12 líneas desde el inicio y crecen hasta 24; placeholders con contraste mejorado. Se añaden intervalos de sustitución a los resultados del motor para permitir remapear estilos sin duplicar originales. La descarga multiformato todavía está en desarrollo y no se declara entregada en esta tanda.

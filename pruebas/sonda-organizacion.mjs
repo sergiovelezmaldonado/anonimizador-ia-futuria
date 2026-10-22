@@ -32,9 +32,14 @@ check('explicaciones de ambos bloques visibles al estar plegados',await ev(`['se
 check('Ir a Anonimizar texto está al final de Ajustes y a la derecha',await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Ir a Anonimizar texto →');const w=document.querySelector('[aria-controls="settings-words"]')?.closest('section');const footer=b?.closest('[data-settings-next]');return !!b&&!!w&&!!footer&&(w.compareDocumentPosition(footer)&Node.DOCUMENT_POSITION_FOLLOWING)>0&&getComputedStyle(footer).justifyContent==='flex-end'})()`));
 await shot('02-ajustes-plegados');
 await toggle('settings-types');await toggle('settings-words');
+check('título de selección dice qué datos anonimizar',await ev(`document.querySelector('#cats-title')?.innerText.includes('Selecciona qué tipos de datos anonimizar')`));
+check('la matriz usa color en las filas y las casillas activas',await ev(`(()=>{const r=document.querySelector('#cats-body tr'),x=r?.querySelector('input');if(!r||!x)return false;const a=getComputedStyle(r).backgroundColor.match(/\\d+/g)?.map(Number)||[];return a.length>=3&&!(a[0]===a[1]&&a[1]===a[2])&&getComputedStyle(x).accentColor!=='rgb(34, 34, 34)'})()`));
+check('ambos campos muestran doce líneas desde que se abren',await ev(`['custom-terms','whitelist'].every(id=>{const t=document.getElementById(id);return t&&t.rows>=12&&t.getBoundingClientRect().height>=parseFloat(getComputedStyle(t).lineHeight)*12})`));
 check('tipos de datos organizados en tabla de cuatro columnas',await ev(`(()=>{const t=document.querySelector('#settings-types table');return !!t&&JSON.stringify([...t.querySelectorAll('thead th')].map(x=>x.textContent.trim()))===JSON.stringify(['Ocultar','Tipo de dato','Qué se oculta','Ejemplo'])})()`));
 check('cada tipo tiene casilla, descripción y ejemplo en su fila',await ev(`(()=>{const a=[...document.querySelectorAll('#cats-body tr')];return a.length===13&&a.every(r=>r.querySelector('input[type=checkbox]')&&r.querySelector('[data-type-description]')?.textContent.trim()&&r.querySelector('[data-type-example]')?.textContent.trim())})()`));
-check('claves siempre seleccionadas y no desactivables en la matriz',await ev(`(()=>{const c=document.querySelector('#type-credentials');return !!c&&c.checked&&c.disabled})()`));
+check('claves activas por defecto pero editables en la matriz',await ev(`(()=>{const c=document.querySelector('#type-credentials');return !!c&&c.checked&&!c.disabled})()`));
+await ev(`document.querySelector('#type-credentials').click()`);await wait(180);
+check('desmarcar claves respeta la elección y muestra advertencia',await ev(`!document.querySelector('#type-credentials').checked&&/podrían quedar visibles/i.test(document.querySelector('[data-credentials-warning]')?.innerText||'')`));
 check('filas conservan posición al cambiar una selección',await ev(`(()=>{const r=document.querySelector('#cats-body tr'),x=r?.querySelector('input:not(:disabled)');if(!x)return false;window.__matrixRow=r;x.focus();x.click();return true})()`));await wait(200);
 check('selección conserva fila y foco en la casilla',await ev(`document.querySelector('#cats-body tr')===window.__matrixRow&&document.activeElement===window.__matrixRow?.querySelector('input')`));
 await ev(`window.scrollTo(0,document.querySelector('#settings-types').getBoundingClientRect().top+scrollY-155)`);await wait(150);await shot('04-matriz-tipos');
@@ -55,6 +60,12 @@ await send('DOM.setFileInputFiles',{objectId:fileHandle.result.result.objectId,f
 check('subir un archivo habilita Anonimizar documento',await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Anonimizar documento');return !!b&&!b.disabled&&document.querySelector('#input-text').value.includes('contacto@ejemplo.test')})()`));
 await ev(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Anonimizar documento')?.click()`);await wait(600);
 check('Anonimizar documento procesa el archivo subido',await ev(`!!document.querySelector('#output-title')&&!!document.querySelector('button.anon')`));
+check('claves desactivadas conservan el dato y avisan en el resultado',await ev(`document.querySelector('#output-title')?.closest('section').innerText.includes('CLAVE_FICTICIA_123')&&/credenciales.*sin ocultar/i.test(document.querySelector('[aria-label="Estado de revisión"]')?.innerText||'')`));
+await tab('Ajustes');await toggle('settings-types');
+await ev(`document.querySelector('#type-credentials').click()`);await wait(180);
+await ev(`window.scrollTo(0,document.querySelector('#settings-types').getBoundingClientRect().top+scrollY-155)`);await wait(120);await shot('07-matriz-color-recomendada');
+await tab('Anonimizar texto');await ev(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Anonimizar documento').click()`);await wait(500);
+check('reactivar claves vuelve a sustituirlas y conserva el texto fuente',await ev(`document.querySelector('#input-text').value.includes('CLAVE_FICTICIA_123')&&!document.querySelector('#output-title')?.closest('section').innerText.includes('CLAVE_FICTICIA_123')&&document.querySelector('#output-title')?.closest('section').innerText.includes('[CREDENCIAL_')`));
 check('un solo botón Cargar un ejemplo',await ev(`[...document.querySelectorAll('button')].filter(b=>b.textContent.trim()==='Cargar un ejemplo'&&!b.closest('[hidden]')).length===1&&!/Elegir un ejemplo|Ver un ejemplo ahora|Más ejemplos/.test(document.body.innerText)`));
 await ev(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Cargar un ejemplo').click()`);await wait(500);
 check('Cargar un ejemplo abre selector de ejemplos',await ev(`!!document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]')`));

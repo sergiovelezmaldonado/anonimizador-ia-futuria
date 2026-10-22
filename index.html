@@ -146,7 +146,7 @@ const CATS = [
     label: 'Credenciales y API keys',
     ex: 'api_key=abc123, «redacted:sk_live_…», password: secreta',
     color: '#dc2626', bg: '#fef2f2', border: '#fecaca', tag: 'CREDENCIAL', icon: '🔑',
-    on: true, alwaysOn: true,
+    on: true,
     pats: [
       /\b(?:sk_live|sk_test|sk_proj)[A-Za-z0-9_\-]{10,}/g,
       /\b(?:api[_\-]?key|api[_\-]?secret|access[_\-]?token|auth[_\-]?token|client[_\-]?secret|password|contraseña|clave(?: de acceso)?)(?:\s*[:=]\s*|[\t ]+(?![:=]))(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s'"]+)/gi,
@@ -367,7 +367,7 @@ function overlapsRange(ranges, start, end) {
 // ─── Lógica de anonimización ──────────────────────────────────────────────────
 function runAnonymize(text, activeCats, customTerms, options = {}) {
   const source = String(text || '');
-  const reps = [], candidates = [], selected = [];
+  const reps = [], candidates = [], selected = [], edits = [];
   const protectedTags = [...source.matchAll(/\[[A-Z_]+_\d+\]/g)].map(m => ({ start: m.index, end: m.index + m[0].length }));
   const usedTags = new Set(source.match(/\[[A-Z_]+_\d+\]/g) || []);
   const whitelistRanges = buildWhitelistRanges(source, options.whitelist);
@@ -438,10 +438,11 @@ function runAnonymize(text, activeCats, customTerms, options = {}) {
       reps.push(rep); repByTag.set(tag, rep);
     }
     repByTag.get(tag).count += 1;
+    edits.push({ start: item.start, end: item.end, replacement: tag });
     out += source.slice(cursor, item.start) + tag;
     cursor = item.end;
   }
-  return { out: out + source.slice(cursor), reps };
+  return { out: out + source.slice(cursor), reps, edits };
 }
 
 // ─── Revisión residual: usa los mismos patrones que el motor ───────────────────
@@ -484,13 +485,13 @@ function canonicalTag(kind, num) {
 }
 function restoreTags(text, mapping) {
   const source = String(text || '');
-  const resolved = [], unresolved = new Set(), repaired = [];
+  const resolved = [], unresolved = new Set(), repaired = [], edits = [];
   const seen = new Set();
   // 1) Etiquetas exactas. 2) Variantes: espacios/guiones, minúsculas, sin corchetes, alias en inglés, espacios internos.
   // Sin corchetes solo se acepta un tipo conocido (en cualquier caja), para no tocar identificadores normales como foo_1.
   const knownKinds = [...new Set([...Object.keys(TAG_ALIASES), ...Object.values(TAG_ALIASES), 'PERSONA', 'EMAIL', 'URL', 'IP', 'CREDENCIAL', 'CUENTA', 'ID_FISCAL', 'TELEFONO', 'MONTO', 'NACIMIENTO', 'DIRECCION', 'EMPRESA', 'FECHA', 'PERSONALIZADO'])].sort((a, b) => b.length - a.length).join('|');
   const loose = new RegExp('\\[\\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ_\\s\\-]*?)[\\s_\\-]+(\\d+)\\s*\\]|(?<![\\p{L}\\p{N}_\\[])(' + knownKinds + ')_(\\d+)(?![\\p{L}\\p{N}_\\]])', 'giu');
-  const out = source.replace(loose, (whole, kindA, numA, kindB, numB) => {
+  const out = source.replace(loose, (whole, kindA, numA, kindB, numB, offset) => {
     const kind = kindA ?? kindB, num = numA ?? numB;
     const canonical = canonicalTag(kind.trim(), num);
     if (mapping[canonical] === undefined) {
@@ -499,9 +500,10 @@ function restoreTags(text, mapping) {
     }
     if (!seen.has(canonical)) { seen.add(canonical); resolved.push({ tag: canonical, value: mapping[canonical] }); }
     if (whole !== canonical) repaired.push({ found: whole, tag: canonical });
+    edits.push({ start: offset, end: offset + whole.length, replacement: String(mapping[canonical]) });
     return mapping[canonical];
   });
-  return { out, resolved, unresolved: [...unresolved], repaired };
+  return { out, resolved, unresolved: [...unresolved], repaired, edits };
 }
 
 // ─── Mapas TSV: JSON solo cuando el encabezado lo declara ─────────────────────
@@ -1271,7 +1273,7 @@ function HowToTab({ onStart }) {
       desc: 'En «Anonimizar texto», pega el texto o sube un PDF, Word, TXT o CSV. Si prefieres probar primero, pulsa «Cargar un ejemplo» y elige uno de los 50 textos con datos inventados.',
       tip: 'Los PDF escaneados (fotos) no tienen texto que leer. Conviértelos con una herramienta de tu empresa; no los subas a un convertidor en línea.' },
     { n: '2', icon: '⚙️', title: 'Revisa los Ajustes (opcional)',
-      desc: 'En la pestaña «Ajustes», abre «Selecciona qué tipos de datos ocultar». Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. En «Personaliza palabras para anonimizar o dejar visibles» puedes añadir proyectos o clientes que siempre deban ocultarse, y palabras que pueden quedar visibles. Se hace una vez por sesión.',
+      desc: 'En la pestaña «Ajustes», abre «Selecciona qué tipos de datos anonimizar». Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. En «Personaliza palabras para anonimizar o dejar visibles» puedes añadir proyectos o clientes que siempre deban ocultarse, y palabras que pueden quedar visibles. Se hace una vez por sesión.',
       tip: 'Montos, direcciones, empresas y fechas se detectan por aproximación: si los activas, revisa el resultado con más cuidado.' },
     { n: '3', icon: '🔒', title: 'Pulsa «Anonimizar documento» y revisa',
       desc: 'Cada dato se cambia por una etiqueta como [PERSONA_1] o [EMAIL_1]; la misma persona recibe siempre la misma etiqueta. El aviso de color te dice si queda algo por ocultar. Lee el resultado, marca «Revisé el texto…» y se activan Copiar y Descargar.',
@@ -2743,13 +2745,13 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
   const [showTypes, setShowTypes] = useState(false);
   const [showWords, setShowWords] = useState(false);
   const activeIds = cats.filter(c => c.on).map(c => c.id).sort().join(',');
-  const activePreset = PRESETS.find(p => [...new Set([...p.cats, ...cats.filter(c => c.alwaysOn).map(c => c.id)])].sort().join(',') === activeIds);
-  const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
+  const activePreset = PRESETS.find(p => [...new Set(p.cats)].sort().join(',') === activeIds);
+  const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] placeholder:text-[#666666] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
   // Orden estable: marcar una casilla no mueve su fila ni el foco.
   const ordered = cats;
   return (
     <div className="space-y-4">
-      <CollapsibleSection open={showTypes} onToggle={() => setShowTypes(v => !v)} id="settings-types" titleId="cats-title" title="Selecciona qué tipos de datos ocultar" subtitle="Marca nombres, teléfonos, correos, identificaciones y otros datos para sustituirlos por etiquetas. Puedes mantener la selección recomendada o adaptarla a tu documento.">
+      <CollapsibleSection open={showTypes} onToggle={() => setShowTypes(v => !v)} id="settings-types" titleId="cats-title" title="Selecciona qué tipos de datos anonimizar" subtitle="Marca nombres, teléfonos, correos, identificaciones y otros datos para sustituirlos por etiquetas. Puedes mantener la selección recomendada o adaptarla a tu documento.">
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -2762,7 +2764,7 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
               return (
                 <button key={p.id} type="button" role="radio" aria-checked={!!selected} onClick={() => onPreset(p)} title={p.desc}
                   className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
-                    selected ? 'border-[#222222] bg-[#222222] text-white' : 'border-[#d4d4d4] bg-white text-[#333333] hover:border-[#222222]')}>
+                    selected ? 'border-[#b00020] bg-[#fff5f6] text-[#8c001a]' : 'border-[#d4d4d4] bg-white text-[#333333] hover:border-[#b00020]')}>
                   {p.label}
                 </button>
               );
@@ -2770,30 +2772,32 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
             {!activePreset ? <span className="text-xs text-[#6b6b6b]">Personalizado</span> : null}
           </div>
         </div>
+        <p className="mt-3 text-sm leading-relaxed text-[#444444]" data-credentials-help>Recomendamos mantener activas «Claves y contraseñas»: pueden dar acceso a cuentas y servicios. Vienen marcadas por precaución, pero puedes desmarcarlas si tu tarea lo requiere.</p>
+        {!cats.find(c => c.id === 'credentials')?.on ? <p data-credentials-warning role="alert" className="mt-2 rounded-xl border border-[#fcd34d] bg-[#fffbeb] px-4 py-3 text-sm text-[#78350f]">Claves y contraseñas desactivadas: no se sustituirán automáticamente y podrían quedar visibles en el resultado que compartas. Comprueba que no haya ninguna clave real antes de copiar.</p> : null}
         <p className="mt-3 text-xs text-[#6b6b6b] sm:hidden">Desliza la tabla hacia los lados para ver la descripción y el ejemplo.</p>
         <div className="mt-4 max-w-full overflow-x-auto rounded-2xl border border-[#e5e5e5]" tabIndex={0} role="region" aria-label="Tabla de tipos de datos; desplazable horizontalmente">
           <table className="w-full min-w-[680px] table-fixed text-sm">
-            <caption className="sr-only">Tipos de datos que se anonimizarán. Marca o desmarca cada casilla; las claves permanecen siempre activas.</caption>
+            <caption className="sr-only">Tipos de datos que se anonimizarán. Marca o desmarca cada casilla. Recomendamos mantener activas las claves y contraseñas.</caption>
             <colgroup><col style={{ width: '72px' }} /><col style={{ width: '23%' }} /><col style={{ width: '43%' }} /><col /></colgroup>
-            <thead className="border-b border-[#d4d4d4] bg-[#f3f4f6] text-[#333333]">
+            <thead className="border-b border-[#f3c6cc] bg-[#fff5f6] text-[#7a1024]">
               <tr><th scope="col" className="px-2 py-3 text-center font-semibold">Ocultar</th><th scope="col" className="px-3 py-3 text-left font-semibold">Tipo de dato</th><th scope="col" className="px-3 py-3 text-left font-semibold">Qué se oculta</th><th scope="col" className="px-3 py-3 text-left font-semibold">Ejemplo</th></tr>
             </thead>
             <tbody id="cats-body">
               {ordered.map(c => {
                 const help = TYPE_HELP[c.id];
                 return (
-                  <tr key={c.id} className={cn('border-b border-[#e5e5e5] last:border-b-0', c.on ? 'bg-[#fafafa]' : 'bg-white')}>
-                    <td className="px-2 py-2 text-center align-top">
+                  <tr key={c.id} className="border-b border-[#e5e5e5] last:border-b-0" style={{ backgroundColor: c.on ? c.bg : '#fff' }}>
+                    <td className="px-2 py-2 text-center align-top" style={{ borderLeft: '4px solid ' + (c.on ? c.color : 'transparent') }}>
                       <label className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center" htmlFor={'type-' + c.id}>
                         <span className="sr-only">{c.short || c.label}</span>
-                        <input id={'type-' + c.id} type="checkbox" checked={c.on} disabled={c.alwaysOn} onChange={() => onToggle(c.id)}
-                          aria-describedby={'type-desc-' + c.id + (c.alwaysOn ? ' type-always-' + c.id : '')}
-                          className="h-5 w-5 accent-[#222222] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b00020] disabled:cursor-not-allowed" />
+                        <input id={'type-' + c.id} type="checkbox" checked={c.on} onChange={() => onToggle(c.id)}
+                          aria-describedby={'type-desc-' + c.id + (c.id === 'credentials' ? ' type-recommended-' + c.id : '')}
+                          style={{ accentColor: c.color }} className="h-5 w-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b00020]" />
                       </label>
                     </td>
-                    <th scope="row" className="px-3 py-4 text-left align-top font-semibold text-[#222222]">
-                      <label htmlFor={'type-' + c.id} className={c.alwaysOn ? 'cursor-default' : 'cursor-pointer'}>{c.short || c.label}</label>
-                      {c.alwaysOn ? <span id={'type-always-' + c.id} className="mt-1 block text-xs font-normal text-[#555555]">Siempre activo</span> : null}
+                    <th scope="row" className="px-3 py-4 text-left align-top font-semibold" style={{ color: c.color }}>
+                      <label htmlFor={'type-' + c.id} className="cursor-pointer">{c.short || c.label}</label>
+                      {c.id === 'credentials' ? <span id={'type-recommended-' + c.id} className="mt-1 block text-xs font-normal text-[#555555]">Recomendado · tú decides</span> : null}
                     </th>
                     <td data-type-description id={'type-desc-' + c.id} className="px-3 py-4 align-top leading-relaxed text-[#444444]">{help.description}</td>
                     <td data-type-example className="break-words px-3 py-4 align-top text-xs leading-relaxed text-[#555555]">{help.example}</td>
@@ -2810,13 +2814,13 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
         <div>
           <label htmlFor="custom-terms" className="block font-bold text-[#222222]">Oculta siempre estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
           <p id="custom-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Nombres, proyectos o códigos que la app no detecta sola. Uno por línea.</p>
-          <GrowingTextarea id="custom-terms" className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
+          <GrowingTextarea id="custom-terms" minRows={12} maxRows={24} className={fieldClass} value={customTerms} onChange={e => onCustomTerms(e.target.value)}
             placeholder={"Juan Pérez García\nProyecto Orión\nContrato-2024-XZ"} aria-describedby="custom-help" />
         </div>
         <div>
           <label htmlFor="whitelist" className="block font-bold text-[#222222]">Deja visibles estas palabras <span className="text-xs font-normal text-[#6b6b6b]">(opcional)</span></label>
           <p id="whitelist-help" className="mb-2 mt-1 text-sm text-[#6b6b6b]">Lo que la IA sí puede ver: tu empresa, tu ciudad, un correo público. Uno por línea.</p>
-          <GrowingTextarea id="whitelist" className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
+          <GrowingTextarea id="whitelist" minRows={12} maxRows={24} className={fieldClass} value={whitelist} onChange={e => onWhitelist(e.target.value)}
             placeholder={"Mi Empresa S.A.\nventas@miempresa.com\nBogotá"} aria-describedby="whitelist-help" />
           <p className="mt-1.5 text-xs text-[#6b6b6b]">También puedes tocar una etiqueta del resultado y elegir «dejar visible».</p>
         </div>
@@ -2835,12 +2839,10 @@ function useSettings() {
   const [version, setVersion] = useState(0); // cambia con cada ajuste: WorkTab invalida su resultado
   const bump = () => setVersion(v => v + 1);
   const toggleCat = (id) => {
-    const cat = CATS.find(c => c.id === id);
-    if (cat && cat.alwaysOn) return;
     setCats(prev => prev.map(c => c.id === id ? Object.assign({}, c, { on: !c.on }) : c)); bump();
   };
-  const applyPreset = (preset) => { setCats(prev => prev.map(c => c.alwaysOn ? c : Object.assign({}, c, { on: preset.cats.includes(c.id) }))); bump(); };
-  const setCatsForTemplate = (templateCats) => { setCats(prev => prev.map(c => c.alwaysOn ? c : Object.assign({}, c, { on: c.id === 'person' || c.id === 'birthdate' || templateCats.includes(c.id) }))); bump(); };
+  const applyPreset = (preset) => { setCats(prev => prev.map(c => Object.assign({}, c, { on: preset.cats.includes(c.id) }))); bump(); };
+  const setCatsForTemplate = (templateCats) => { setCats(prev => prev.map(c => Object.assign({}, c, { on: c.id === 'credentials' || c.id === 'person' || c.id === 'birthdate' || templateCats.includes(c.id) }))); bump(); };
   const updateCustomTerms = v => { setCustomTerms(v); bump(); };
   const updateWhitelist = v => { setWhitelist(v); bump(); };
   const addCustomTerm = term => { setCustomTerms(prev => (prev.trim() ? prev.replace(/\s+$/, '') + '\n' : '') + term); bump(); };

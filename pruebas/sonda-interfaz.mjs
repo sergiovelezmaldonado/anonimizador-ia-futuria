@@ -1,6 +1,6 @@
 // Verifica los 3 cambios de interfaz pedidos por Sergio, adaptados a la Fase 0:
 // 1) Terminos personalizados: ya no son 15 filas fijas; es un campo que CRECE al escribir
-//    (minimo 3 filas, la altura aumenta al pegar 10 lineas) dentro del panel 'Qué ocultar' (colapsado).
+//    (minimo 12 filas, la altura aumenta al pegar 10 lineas) dentro del panel 'Qué ocultar' (colapsado).
 // 2) Texto a anonimizar grande (#input-text, rows=14)
 // 3) "📋 Plantillas de ejemplo" abre una ventana emergente centrada, no un panel que empuja la pagina
 const CDP = 'http://127.0.0.1:9334';
@@ -42,7 +42,7 @@ async function main() {
   await sleep(800);
   await ev(`document.querySelector('[aria-controls="settings-types"]').click();document.querySelector('[aria-controls="settings-words"]').click()`); await sleep(250);
   check('los campos de palabras propias están visibles al desplegar su bloque', await ev(`['#custom-terms','#whitelist'].every(id=>{const t=document.querySelector(id);return t&&t.offsetParent!==null})`));
-  check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Selecciona qué tipos de datos ocultar/.test(document.querySelector('#cats-title')?.innerText||'')`));
+  check('el bloque de tipos de datos tiene un título que explica su función', await ev(`/Selecciona qué tipos de datos anonimizar/.test(document.querySelector('#cats-title')?.innerText||'')`));
   await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`);
   await sleep(800);
   check('la pestaña de trabajo no muestra el panel de tipos (sin ruido)', await ev(`!document.querySelector('#cats-title') && !document.querySelector('#custom-terms')`));
@@ -58,11 +58,11 @@ async function main() {
   console.log('medidas de los textareas:', JSON.stringify(antes));
   const { terminos, pegado } = antes;
 
-  check('Términos personalizados tiene al menos 3 filas (crece al escribir)', terminos && terminos.rows >= 3, terminos ? 'rows=' + terminos.rows + ' alto=' + terminos.alturaPx + 'px' : 'no encontrado');
-  await setValue('#custom-terms', Array.from({ length: 10 }, (_, i) => 'Término ' + (i + 1)).join('\n'));
+  check('Términos personalizados muestra 12 filas antes de escribir', terminos && terminos.rows >= 12, terminos ? 'rows=' + terminos.rows + ' alto=' + terminos.alturaPx + 'px' : 'no encontrado');
+  await setValue('#custom-terms', Array.from({ length: 20 }, (_, i) => 'Término ' + (i + 1)).join('\n'));
   await sleep(500);
   const despues = JSON.parse(await medir());
-  check('Términos personalizados crece al pegar 10 líneas (>=9 líneas visibles)', despues.terminos && despues.terminos.alturaPx > terminos.alturaPx + 60 && despues.terminos.lineas >= 9,
+  check('Términos personalizados crece al pegar 20 líneas (>=19 líneas visibles)', despues.terminos && despues.terminos.alturaPx > terminos.alturaPx + 60 && despues.terminos.lineas >= 19,
     despues.terminos ? terminos.alturaPx + 'px -> ' + despues.terminos.alturaPx + 'px (~' + despues.terminos.lineas + ' lineas)' : '');
   await setValue('#custom-terms', ''); await sleep(300);
   await ev(`[...document.querySelectorAll('[role=tab]')].find(x=>/Anonimizar texto/.test(x.innerText))?.click()`); await sleep(800);
