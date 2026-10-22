@@ -19,7 +19,7 @@ check('aterriza en «Cómo usar» y es la primera pestaña', await ev(`/Cómo us
 check('«Empezar ahora» lleva a la vista de trabajo', await click('Empezar ahora')); await pause(300);
 check('vista de trabajo visible', await ev(`!!document.querySelector('#input-text')`));
 check('pestañas con patrón tablist', await ev(`document.querySelectorAll('[role=tablist] [role=tab]').length===5`));
-const pickExample = async () => { const ok = await click('Cargar un ejemplo'); await pause(900); await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');const b=d&&d.querySelector('.grid button');b&&b.click();})()`); await pause(700); await click('Ocultar datos sensibles'); await pause(600); return ok; };
+const pickExample = async () => { const ok = await click('Cargar un ejemplo'); await pause(900); await ev(`(()=>{const d=document.querySelector('[role=dialog][aria-label="Plantillas de ejemplo"]');const b=d&&d.querySelector('.grid button');b&&b.click();})()`); await pause(700); await click('Anonimizar documento'); await pause(600); return ok; };
 check('botón Cargar un ejemplo abre la ventana y procesa', await pickExample());
 check('resultado con etiquetas', await ev(`(document.body.innerText.match(/\\[[A-Z_]+_\\d+\\]/g)||[]).length>=6`));
 check('semáforo no bloquea el ejemplo (categorías inactivas solo avisan)', await ev(`!document.querySelector('input[data-review]').disabled`));
@@ -47,11 +47,11 @@ check('términos a ocultar con altura mínima de 3 líneas', termsH >= 80, 'alto
 check('lista blanca con altura mínima de 3 líneas', await ev(`document.querySelector('#whitelist').getBoundingClientRect().height>=80`));
 check('títulos de Ajustes explican cada bloque', await ev(`/Selecciona qué tipos de datos ocultar/.test(document.body.innerText) && /Personaliza palabras para anonimizar o dejar visibles/.test(document.body.innerText) && /Oculta siempre estas palabras/.test(document.body.innerText) && /Deja visibles estas palabras/.test(document.body.innerText)`));
 // Un cambio en Ajustes deja obsoleto el resultado de la pestaña de trabajo
-await ev(`[...document.querySelectorAll('#cats-body button')].find(b=>b.getAttribute('aria-pressed')==='false' && !b.disabled).click()`); await pause(200);
+await ev(`[...document.querySelectorAll('#cats-body input[type=checkbox]')].find(b=>!b.checked && !b.disabled).click()`); await pause(200);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto/.test(b.textContent)).click()`); await pause(400);
 check('la pestaña de trabajo conserva el texto pero invalida el resultado tras cambiar Ajustes', await ev(`document.querySelector('#input-text').value.length>50 && !document.querySelector('#output-title')`));
 check('resumen de ajustes con enlace en la pestaña de trabajo', await ev(`/Cambiar en Ajustes/.test(document.querySelector('[data-settings-summary]')?.innerText||'')`));
-await click('Ocultar datos sensibles'); await pause(600);
+await click('Anonimizar documento'); await pause(600);
 check('«¿Se escapó algo? Ocultar también» disponible en el resultado', await ev(`!!document.querySelector('#extra-term')`));
 check('los ejemplos van arriba, antes del cuadro de texto', await ev(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>/Cargar un ejemplo/.test(x.textContent));const t=document.querySelector('#input-text');return b&&t&&b.getBoundingClientRect().top<t.getBoundingClientRect().top})()`));
 check('1 · Pega tu texto sigue en la pestaña de trabajo', await ev(`/1 · Pega tu texto/.test(document.body.innerText)`));
@@ -74,7 +74,7 @@ await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Anonimizar texto
 // Recuperar tolerante en la interfaz
 await ev(`document.querySelector('#input-text').focus()`);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#input-text');s.call(t,'Cliente: Ana Ruiz, correo ana@x.test, cel 0991234567');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-await click('Ocultar datos sensibles'); await pause(400);
+await click('Anonimizar documento'); await pause(400);
 await ev(`[...document.querySelectorAll('[role=tab]')].find(b=>/Restaurar datos originales/.test(b.textContent)).click()`); await pause(300);
 await ev(`(()=>{const s=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;const t=document.querySelector('#modified-text');s.call(t,'Hola [PERSONA 1], te escribo a **[EMAIL_1]** y PERSONA_1 al [PHONE_1].');t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
 await click('Recuperar datos originales'); await pause(300);

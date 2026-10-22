@@ -99,9 +99,9 @@ async function main() {
   await sleep(1200);
 
   const clicAnon = await evalJs(`(()=>{
-    const b=Array.from(document.querySelectorAll('button')).find(x=>/Ocultar datos sensibles/.test(x.innerText)&&!x.disabled);
+    const b=Array.from(document.querySelectorAll('button')).find(x=>/Anonimizar documento/.test(x.innerText)&&!x.disabled);
     if(!b) return false; b.click(); return true; })()`);
-  check('boton Ocultar datos sensibles accionable', clicAnon);
+  check('boton Anonimizar documento accionable', clicAnon);
   await sleep(3000);
 
   const txt = String(await evalJs('document.body.innerText'));

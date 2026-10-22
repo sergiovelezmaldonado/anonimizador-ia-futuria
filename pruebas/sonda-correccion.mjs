@@ -68,7 +68,7 @@ async function main() {
   }
   check('el PDF se carga', chars > 100, 'chars=' + chars);
 
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ocultar datos sensibles/.test(x.innerText)&&!x.disabled);b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Anonimizar documento/.test(x.innerText)&&!x.disabled);b&&b.click();})()`);
   await sleep(2500);
   await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ver como documento/.test(x.innerText)&&!x.disabled);b&&b.click();})()`);
   await sleep(2500);

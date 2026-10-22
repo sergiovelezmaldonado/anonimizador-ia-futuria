@@ -1,6 +1,6 @@
 // Verifica que las 12 paginas del PDF llegan hasta el resultado anonimizado.
 // Fase 0: la carga vive en la pestaña de trabajo ('🔒 Anonimizar texto'); el texto extraido
-// se vuelca en #input-text, se procesa con '🔒 Ocultar datos sensibles' y el visor se abre
+// se vuelca en #input-text, se procesa con '🔒 Anonimizar documento' y el visor se abre
 // con '🔎 Ver como documento'. Los marcadores se comprueban DENTRO del visor modal.
 const CDP = 'http://127.0.0.1:9334';
 const URL_APP = 'http://localhost:5199/';
@@ -52,8 +52,8 @@ async function main() {
   console.log('promedio por pagina: ' + Math.round(chars / TOTAL));
 
   // anonimizar y abrir el visor modal
-  const clic = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ocultar datos sensibles/.test(x.innerText)&&!x.disabled);if(!b)return false;b.click();return true;})()`);
-  console.log('boton "Ocultar datos sensibles" accionado: ' + clic);
+  const clic = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Anonimizar documento/.test(x.innerText)&&!x.disabled);if(!b)return false;b.click();return true;})()`);
+  console.log('boton "Anonimizar documento" accionado: ' + clic);
   await sleep(3000);
   const clicVisor = await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ver como documento/.test(x.innerText)&&!x.disabled);if(!b)return false;b.click();return true;})()`);
   console.log('boton "Ver como documento" accionado: ' + clicVisor);

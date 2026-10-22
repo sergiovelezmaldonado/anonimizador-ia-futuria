@@ -1,6 +1,6 @@
 # Anonimizador IA — FuturIA (App 7)
 
-> **Fase 0 y organización aprobada (2026-10-21): 235/235 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
+> **Fase 0 y organización aprobada (2026-10-21): 245/245 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
 
 Oculta datos sensibles de la información de tu empresa **antes** de pegarla en ChatGPT,
 Claude, Gemini o cualquier otro modelo. El reemplazo es reversible: cada dato
@@ -19,6 +19,14 @@ app (React, Babel, Tailwind y la fuente desde CDN), así que sin conexión no ar
 - **Anonimizar texto** conserva una sola entrada a los ejemplos: «Cargar un ejemplo», que abre el selector. Tipos y palabras propias permanecen en Ajustes; el resultado ofrece el atajo «Ocultar también».
 - **Restaurar datos originales** y **Privacidad** completan la navegación. Cambiar Ajustes invalida el resultado anterior y conserva el texto.
 - La nueva sonda pruebas/sonda-organizacion.mjs prueba plegado, orden, título literal, campos, conservación y foco al escribir, selector de ejemplos y ausencia de desborde a 360 px. Capturas de los estados en pruebas/capturas-organizacion/.
+
+### Ajuste posterior: acciones al final y matriz de selección
+
+«Empezar ahora» queda después del glosario, al final de Cómo usar, alineado a la derecha. «Ir a Anonimizar texto» queda al final de Ajustes, después de palabras personalizadas, también a la derecha y visible con los bloques plegados.
+
+Los tipos se seleccionan en una tabla de cuatro columnas: **Ocultar** (casilla), **Tipo de dato**, **Qué se oculta** y **Ejemplo**. Una fila por tipo, orden estable, claves siempre activas. Sustituye a las píldoras de categorías por petición explícita de Sergio. En móvil solo la tabla se desplaza horizontalmente; la página no desborda.
+
+El botón que ejecuta la transformación se llama **«Anonimizar documento»**, tanto para texto pegado como para archivos subidos. Se habilita cuando hay contenido válido y termina la carga. El paso a paso y las sondas usan el mismo nombre. «Personaliza palabras para anonimizar o dejar visibles» no cambió. El nombre de la pestaña «Cómo usar» sigue pendiente de elección; no se renombró.
 
 ## Qué contiene
 
@@ -83,10 +91,10 @@ node pruebas/sonda-app.mjs              # 30 · regresión general
 node pruebas/sonda-fase0.mjs            # 41 · Fase 0: flujo, diálogos, popovers, móvil
 node pruebas/sonda-correccion.mjs       # 13 · saltos de línea y límites de carga
 node pruebas/sonda-interfaz.mjs         # 24 · tamaños y ventana emergente
-node pruebas/sonda-organizacion.mjs     # 16 · plegables y organización aprobada
+node pruebas/sonda-organizacion.mjs     # 26 · plegables y organización aprobada
 ```
 
-**235 comprobaciones verificadas el 2026-10-21**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
+**245 comprobaciones verificadas el 2026-10-21**, más un PDF de 12 páginas, contra el motor publicado y la app realmente servida por CDP: dependencias
 pinneadas, Tailwind efectivamente aplicado, el flujo completo de anonimización,
 que ningún dato crudo quede en el bloque de salida, que la tabla de equivalencias
 sí conserve los originales (reversibilidad), que no haya peticiones a ningún

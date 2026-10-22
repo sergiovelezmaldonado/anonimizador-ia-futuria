@@ -43,7 +43,7 @@ try {
   await ev(`window.__native={alert:0,confirm:0};window.alert=()=>{window.__native.alert++};window.confirm=()=>{window.__native.confirm++;return true};`);
   await tab('Anonimizar texto');
   await fill('#input-text','Paciente: María García. Correo: maria@ejemplo.test.');
-  await click('Ocultar datos sensibles'); await pause(300);
+  await click('Anonimizar documento'); await pause(300);
   check('sin falso porcentaje de riesgo', !/riesgo residual:\s*\d+%/i.test(await ev('document.body.innerText')));
   check('copiar bloqueado antes de revisión manual', await ev(`([...document.querySelectorAll('button')].find(b=>b.textContent.includes('Copiar para pegar en la IA'))||{}).disabled===true && ([...document.querySelectorAll('button')].find(b=>b.textContent.includes('Copiar solo el texto'))||{}).disabled===true`));
   check('checkbox de revisión disponible', await ev('!!document.querySelector("input[data-review]")'));
@@ -77,11 +77,11 @@ try {
   await click('Copiar llave'); await waitDialog();
   check('copiar mapa advierte que contiene originales', /original|confidencial/i.test(await dialogMsg()));
   await dialogButton('Cancelar');
-  await fill('#input-text','Otro texto de ejemplo.'); await click('Ocultar datos sensibles'); await pause(300);
+  await fill('#input-text','Otro texto de ejemplo.'); await click('Anonimizar documento'); await pause(300);
   check('nuevo resultado invalida revisión anterior', await ev('!document.querySelector("input[data-review]").checked'));
   // Documento: misma pestaña de trabajo, carga de archivo + procesar + visor
   await uploadText('Paciente: Lucía Torres. Correo: lucia@ejemplo.test.','expediente-Lucia-Torres.txt');
-  await click('Ocultar datos sensibles'); await pause(300);
+  await click('Anonimizar documento'); await pause(300);
   await click('Ver como documento'); await pause(400);
   check('Documento también exige revisión', await ev(`${REVIEW}?.checked===false && [...document.querySelectorAll('button')].find(b=>b.textContent.includes('Imprimir')).disabled`));
   await ev(`${REVIEW}.click()`); await pause(150);
@@ -89,7 +89,7 @@ try {
   // Reprocesamiento con salida idéntica: la revisión debe invalidarse.
   await click('← Cerrar'); await pause(200);
   await uploadText('Paciente: Nuria Ramos. Correo: nuria@ejemplo.test.','expediente-Nuria-Ramos.txt');
-  await click('Ocultar datos sensibles'); await pause(300);
+  await click('Anonimizar documento'); await pause(300);
   await click('Ver como documento'); await pause(400);
   check('nuevo Documento invalida revisión aunque genere las mismas etiquetas', await ev(`${REVIEW}.checked===false`));
   await ev(`(()=>{const c=${REVIEW};if(!c.checked)c.click()})()`); await pause(150);
@@ -105,7 +105,7 @@ try {
   await fill('#modified-text','Respuesta: [PERSONA_1] y [EMAIL_1].'); await click('Recuperar datos originales'); await pause(200);
   check('recuperación de Documento restituye nombres y correos', await ev('document.body.innerText.includes("Nuria Ramos") && document.body.innerText.includes("nuria@ejemplo.test")'));
   await tab('Anonimizar texto');
-  await fill('#input-text','Paciente: María\tGarcía.'); await click('Ocultar datos sensibles'); await pause(300);
+  await fill('#input-text','Paciente: María\tGarcía.'); await click('Anonimizar documento'); await pause(300);
   await ev('navigator.clipboard.writeText=text=>{window.__mapCopied=text;return Promise.resolve()}');
   await click('Copiar llave'); await waitDialog(); await dialogButton('Copiar llave'); await pause(300);
   const copiedMap=await ev('window.__mapCopied');

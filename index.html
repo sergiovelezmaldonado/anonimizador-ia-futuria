@@ -1273,7 +1273,7 @@ function HowToTab({ onStart }) {
     { n: '2', icon: '⚙️', title: 'Revisa los Ajustes (opcional)',
       desc: 'En la pestaña «Ajustes», abre «Selecciona qué tipos de datos ocultar». Lo habitual ya viene marcado: personas, identificaciones de toda Hispanoamérica, teléfonos, correos, cuentas, claves y fecha de nacimiento. En «Personaliza palabras para anonimizar o dejar visibles» puedes añadir proyectos o clientes que siempre deban ocultarse, y palabras que pueden quedar visibles. Se hace una vez por sesión.',
       tip: 'Montos, direcciones, empresas y fechas se detectan por aproximación: si los activas, revisa el resultado con más cuidado.' },
-    { n: '3', icon: '🔒', title: 'Pulsa «Ocultar datos sensibles» y revisa',
+    { n: '3', icon: '🔒', title: 'Pulsa «Anonimizar documento» y revisa',
       desc: 'Cada dato se cambia por una etiqueta como [PERSONA_1] o [EMAIL_1]; la misma persona recibe siempre la misma etiqueta. El aviso de color te dice si queda algo por ocultar. Lee el resultado, marca «Revisé el texto…» y se activan Copiar y Descargar.',
       tip: 'Toca una etiqueta para ver el dato original o dejarlo visible si no identifica a nadie.' },
     { n: '4', icon: '🔑', title: 'Guarda la llave',
@@ -1354,7 +1354,6 @@ function HowToTab({ onStart }) {
           ))}
         </ol>
       </CollapsibleSection>
-      {onStart ? <div><AppButton onClick={onStart}>Empezar ahora →</AppButton></div> : null}
 
       <CollapsibleSection open={showCats} onToggle={() => setShowCats(v => !v)} id="howto-cats" title="Qué tipos de datos detecta" subtitle={CATS.length + ' tipos. Los marcados con «Activo» vienen seleccionados al empezar.'}>
         <div className="grid gap-3 md:grid-cols-2">
@@ -1389,6 +1388,7 @@ function HowToTab({ onStart }) {
           ))}
         </dl>
       </CollapsibleSection>
+      {onStart ? <div data-howto-next className="flex justify-end"><AppButton onClick={onStart}>Empezar ahora →</AppButton></div> : null}
     </div>
   );
 }
@@ -2722,13 +2722,31 @@ function GrowingTextarea({ value, onChange, minRows = 3, maxRows = 14, className
   return <textarea ref={ref} rows={minRows} value={value} onChange={onChange} className={className} {...rest} />;
 }
 
+// Ayuda de presentación de la matriz; no cambia los patrones de detección.
+const TYPE_HELP = {
+  person: { description: 'Nombres y apellidos reconocidos por el contexto del documento.', example: 'Cliente: María García' },
+  credentials: { description: 'Contraseñas, claves de acceso y claves para conectar servicios.', example: 'password: CLAVE_FICTICIA' },
+  url: { description: 'Enlaces que pueden revelar una empresa, carpeta o documento.', example: 'https://ejemplo.com/contrato' },
+  email: { description: 'Direcciones de correo de personas o de la empresa.', example: 'maria@ejemplo.com' },
+  financial: { description: 'Números de cuenta, tarjetas y referencias bancarias.', example: 'Cuenta: 1234567890' },
+  ip: { description: 'Direcciones que identifican equipos o conexiones de red.', example: '192.168.1.105' },
+  fiscal: { description: 'Documentos de identidad y números de identificación fiscal.', example: 'Cédula, DNI, RUT, RFC, NIT, RUC…' },
+  phone: { description: 'Teléfonos fijos, celulares y números con prefijo internacional.', example: '+52 55 1234 5678' },
+  money: { description: 'Importes acompañados de una moneda. Revisa las coincidencias.', example: 'USD 45,000.00' },
+  birthdate: { description: 'Fechas de nacimiento y edades indicadas en el texto.', example: 'Edad: 38 años' },
+  address: { description: 'Calles, avenidas y otras referencias postales. Detección aproximada.', example: 'Av. República 123' },
+  company: { description: 'Razones sociales con terminaciones como S.A. o Ltda. Detección aproximada.', example: 'Empresa Ejemplo S.A.' },
+  date: { description: 'Fechas de contratos, reuniones u otros hechos. Revisa las coincidencias.', example: '15 de marzo de 2024' },
+};
+
 function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, whitelist, onWhitelist }) {
   const [showTypes, setShowTypes] = useState(false);
   const [showWords, setShowWords] = useState(false);
   const activeIds = cats.filter(c => c.on).map(c => c.id).sort().join(',');
   const activePreset = PRESETS.find(p => [...new Set([...p.cats, ...cats.filter(c => c.alwaysOn).map(c => c.id)])].sort().join(',') === activeIds);
   const fieldClass = "w-full rounded-2xl border border-[#9a9a9a] bg-white p-3 font-mono text-base sm:text-sm text-[#222222] outline-none transition focus:border-[#b00020] focus:ring-2 focus:ring-[#b00020] resize-none";
-  const ordered = [...cats.filter(c => c.on), ...cats.filter(c => !c.on)];
+  // Orden estable: marcar una casilla no mueve su fila ni el foco.
+  const ordered = cats;
   return (
     <div className="space-y-4">
       <CollapsibleSection open={showTypes} onToggle={() => setShowTypes(v => !v)} id="settings-types" titleId="cats-title" title="Selecciona qué tipos de datos ocultar" subtitle="Marca nombres, teléfonos, correos, identificaciones y otros datos para sustituirlos por etiquetas. Puedes mantener la selección recomendada o adaptarla a tu documento.">
@@ -2752,19 +2770,38 @@ function CategoryPanel({ cats, onToggle, onPreset, customTerms, onCustomTerms, w
             {!activePreset ? <span className="text-xs text-[#6b6b6b]">Personalizado</span> : null}
           </div>
         </div>
-        <div id="cats-body" className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Tipos de datos">
-          {ordered.map(c => (
-            <button key={c.id} type="button" onClick={() => onToggle(c.id)} aria-pressed={c.on} disabled={c.alwaysOn} aria-label={c.label}
-              title={c.alwaysOn ? 'Siempre activo. Las claves nunca deben salir.' : c.label + ' — ej.: ' + c.ex}
-              className={cn('inline-flex min-h-[36px] items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b00020]',
-                c.on ? 'border-transparent text-[#222222]' : 'border-[#d4d4d4] bg-white text-[#555555] hover:border-[#6b6b6b]',
-                c.alwaysOn && 'cursor-default')}
-              style={c.on ? { backgroundColor: c.bg, boxShadow: 'inset 0 0 0 1px ' + c.border } : undefined}>
-              <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] font-bold" style={c.on ? { borderColor: c.color, backgroundColor: c.color, color: '#fff' } : { borderColor: '#9a9a9a', backgroundColor: '#fff' }}>{c.on ? '✓' : ''}</span>
-              <span>{c.short || c.label}</span>
-              {c.alwaysOn ? <span className="text-xs text-[#6b6b6b]">· siempre</span> : null}
-            </button>
-          ))}
+        <p className="mt-3 text-xs text-[#6b6b6b] sm:hidden">Desliza la tabla hacia los lados para ver la descripción y el ejemplo.</p>
+        <div className="mt-4 max-w-full overflow-x-auto rounded-2xl border border-[#e5e5e5]" tabIndex={0} role="region" aria-label="Tabla de tipos de datos; desplazable horizontalmente">
+          <table className="w-full min-w-[680px] table-fixed text-sm">
+            <caption className="sr-only">Tipos de datos que se anonimizarán. Marca o desmarca cada casilla; las claves permanecen siempre activas.</caption>
+            <colgroup><col style={{ width: '72px' }} /><col style={{ width: '23%' }} /><col style={{ width: '43%' }} /><col /></colgroup>
+            <thead className="border-b border-[#d4d4d4] bg-[#f3f4f6] text-[#333333]">
+              <tr><th scope="col" className="px-2 py-3 text-center font-semibold">Ocultar</th><th scope="col" className="px-3 py-3 text-left font-semibold">Tipo de dato</th><th scope="col" className="px-3 py-3 text-left font-semibold">Qué se oculta</th><th scope="col" className="px-3 py-3 text-left font-semibold">Ejemplo</th></tr>
+            </thead>
+            <tbody id="cats-body">
+              {ordered.map(c => {
+                const help = TYPE_HELP[c.id];
+                return (
+                  <tr key={c.id} className={cn('border-b border-[#e5e5e5] last:border-b-0', c.on ? 'bg-[#fafafa]' : 'bg-white')}>
+                    <td className="px-2 py-2 text-center align-top">
+                      <label className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center" htmlFor={'type-' + c.id}>
+                        <span className="sr-only">{c.short || c.label}</span>
+                        <input id={'type-' + c.id} type="checkbox" checked={c.on} disabled={c.alwaysOn} onChange={() => onToggle(c.id)}
+                          aria-describedby={'type-desc-' + c.id + (c.alwaysOn ? ' type-always-' + c.id : '')}
+                          className="h-5 w-5 accent-[#222222] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b00020] disabled:cursor-not-allowed" />
+                      </label>
+                    </td>
+                    <th scope="row" className="px-3 py-4 text-left align-top font-semibold text-[#222222]">
+                      <label htmlFor={'type-' + c.id} className={c.alwaysOn ? 'cursor-default' : 'cursor-pointer'}>{c.short || c.label}</label>
+                      {c.alwaysOn ? <span id={'type-always-' + c.id} className="mt-1 block text-xs font-normal text-[#555555]">Siempre activo</span> : null}
+                    </th>
+                    <td data-type-description id={'type-desc-' + c.id} className="px-3 py-4 align-top leading-relaxed text-[#444444]">{help.description}</td>
+                    <td data-type-example className="break-words px-3 py-4 align-top text-xs leading-relaxed text-[#555555]">{help.example}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
       </CollapsibleSection>
@@ -2828,12 +2865,12 @@ function SettingsTab({ settings, onDone }) {
             <p className="mt-1 text-sm text-[#444444]">Los tipos habituales ya vienen seleccionados. Aquí puedes cambiarlos y añadir palabras propias de tu empresa. Si no necesitas hacer cambios, puedes ir directamente a «Anonimizar texto».</p>
             <p className="mt-1 text-xs text-[#6b6b6b]">Los cambios se aplican al momento y se mantienen durante esta sesión; al recargar o cerrar la pestaña del navegador se pierden.</p>
           </div>
-          {onDone ? <AppButton onClick={onDone}>Ir a Anonimizar texto →</AppButton> : null}
         </div>
       </section>
       <CategoryPanel cats={settings.cats} onToggle={settings.toggleCat} onPreset={p => { settings.applyPreset(p); announce('Selección aplicada: ' + p.label); }}
         customTerms={settings.customTerms} onCustomTerms={settings.updateCustomTerms} whitelist={settings.whitelist} onWhitelist={settings.updateWhitelist} />
       <p className="text-xs text-[#6b6b6b]" data-settings-counts>Ahora mismo: {active} {active === 1 ? 'tipo activo' : 'tipos activos'}{hiddenWords ? ', ' + hiddenWords + (hiddenWords === 1 ? ' palabra que siempre se oculta' : ' palabras que siempre se ocultan') : ''}{visibleWords ? ', ' + visibleWords + (visibleWords === 1 ? ' palabra que queda visible' : ' palabras que quedan visibles') : ''}.</p>
+      {onDone ? <div data-settings-next className="flex justify-end"><AppButton onClick={onDone}>Ir a Anonimizar texto →</AppButton></div> : null}
     </div>
   );
 }
@@ -2920,13 +2957,13 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
 
   const excludeFromResult = (rep) => {
     settings.addWhitelistTerm(rep.original);
-    invalidate(); announce('«' + rep.original + '» quedará visible. Vuelve a pulsar «Ocultar datos sensibles».');
+    invalidate(); announce('«' + rep.original + '» quedará visible. Vuelve a pulsar «Anonimizar documento».');
   };
   const addExtraTerm = () => {
     const t = extraTerm.trim();
     if (t.length < 2) return;
     settings.addCustomTerm(t); setExtraTerm('');
-    invalidate(); announce('«' + t + '» se ocultará siempre. Vuelve a pulsar «Ocultar datos sensibles».');
+    invalidate(); announce('«' + t + '» se ocultará siempre. Vuelve a pulsar «Anonimizar documento».');
   };
 
   const riskData = useMemo(() => result ? computeResidualRisk(result.out, activeIds, { whitelist }) : null, [result, activeIds.join(','), whitelist]);
@@ -3029,7 +3066,7 @@ function WorkTab({ setLastResult, lastResult, settings, onOpenSettings }) {
           </span>
           <span className="flex items-center gap-3 flex-wrap">
             {!inputText.trim() ? <span className="text-xs text-[#6b6b6b]">Pega un texto o <button type="button" onClick={() => setShowTemplates(true)} className="font-semibold text-[#222222] underline">elige un ejemplo</button> para activar el botón →</span> : null}
-            <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>Ocultar datos sensibles</AppButton>
+            <AppButton onClick={anonymize} disabled={!inputText.trim() || (activeCats.length === 0 && !hasCustomTerms) || uploading}>Anonimizar documento</AppButton>
           </span>
         </div>
       </section>

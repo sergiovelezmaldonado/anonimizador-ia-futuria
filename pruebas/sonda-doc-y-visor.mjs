@@ -101,7 +101,7 @@ async function main() {
     s.call(ta,'Contacto maria.lopez@acmecorp.com, telefono +52 55 1234 5678, RFC GODE561231GR8, IP 192.168.14.22');
     ta.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await sleep(1000);
-  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Ocultar datos sensibles/.test(x.innerText.trim())&&!x.disabled);b&&b.click();})()`);
+  await ev(`(()=>{const b=Array.from(document.querySelectorAll('button')).find(x=>/Anonimizar documento/.test(x.innerText.trim())&&!x.disabled);b&&b.click();})()`);
   await sleep(2500);
 
   const hayBoton = await ev(`(()=>!!Array.from(document.querySelectorAll('button')).find(x=>/Ver como documento/i.test(x.innerText)))()`);
