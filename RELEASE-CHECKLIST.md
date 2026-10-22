@@ -1,8 +1,9 @@
 # Puerta de salida a producción — App 7 Anonimizador IA
 
-Estado: **candidata aprobada técnicamente.** Queda el despliegue y las pruebas que exigen dispositivos reales (ver «Pendiente»).
+Estado: **publicada en producción.** Queda solo la prueba en dispositivos reales (ver «Pendiente»).
 
 Candidata: `index.html` sha256 **3c187f1900bf541254f968d1cbdc90dbdb2f76f9cb64165ee9a33c67dd94b13c**
+Versión **v1.0.0**, commit `7250170`, publicada en <https://anonimizador-ia-futuria.vercel.app>
 
 ## Alcance de esta versión
 
@@ -24,16 +25,27 @@ Herramienta gratuita que procesa todo en el navegador: sustituye datos sensibles
 - [x] **Suite completa sobre una única candidata: 429/429**, informe con huella coincidente, sin pruebas omitidas ni suites interrumpidas. Tres pasadas consecutivas sin fallos tras aislar las sondas del navegador.
 - [x] **Recorrido real en navegador: 15/15**, con los cuatro formatos descargados y reimportados, sin una sola petición a internet y sin desbordamiento a 360 px.
 - [x] **Revisión independiente sin hallazgos bloqueantes.** Cinco rondas; cada hallazgo cerrado con pruebas de regresión que fallan si el defecto reaparece.
-- [ ] Commit y etiqueta de la candidata, con push verificado y rollback preparado a un artefacto anterior.
-- [ ] Despliegue con HTTPS y cabeceras de protección; comprobar que los archivos públicos coinciden con los hashes del paquete aprobado y que no se sirve el repositorio, las pruebas ni documentos privados.
-- [ ] Anuncio o publicación en Substack solo después de comprobar el sitio desplegado.
+- [x] Commit `7250170` y etiqueta `v1.0.0` con push verificado contra el remoto; rollback disponible a `a81cf15`.
+- [x] **Despliegue verificado con `npm run verify:site`**: los 35 archivos públicos tienen el hash exacto del paquete aprobado, sobre HTTPS, con CSP sin `unsafe-eval`, `frame-ancestors 'none'`, `nosniff`, `no-referrer`, `DENY` y sin cookies. No se sirve el repositorio, ni `package.json`, ni las pruebas, ni el código de los scripts. 60 comprobaciones, 0 fallos.
+- [x] **Recorrido real sobre el sitio público con `npm run verify:site:browser`**: React de producción sin Babel ni Tailwind CDN, oculta nombre, correo, celular y cédula, conserva acentos y emoji, restaura el original exacto, genera los cuatro formatos, sin almacenamiento en el navegador, sin desbordamiento a 1366/390/360 px, **cero peticiones a otro dominio** y sin errores de consola. 12/12.
+- [ ] Anuncio o publicación en Substack: pendiente de decisión, el sitio ya está comprobado.
 
 ## Pendiente (no bloquea la aprobación técnica)
 
 - Prueba en teléfono físico y en navegadores adicionales: la emulación del navegador **no** sustituye este punto y no debe declararse hecho sin evidencia.
-- `vercel.json` manda `X-Frame-Options: DENY` pero no envía cabecera CSP; el alojamiento debería servir la misma CSP que el servidor local, con `frame-ancestors 'none'`.
 - Los bundles de `docx` y `pdfmake` se sirven tal como los publica cada proyecto: su contenido interno no lo prueba el lock de npm, solo su hash y su SRI.
 - Documentar que una misma entidad escrita con otra grafía (mayúsculas o acentos distintos) se restaura con la grafía de su primera aparición.
+
+## Cómo verificar o revertir la publicación
+
+```bash
+npm run build && npm run verify            # reconstruye y comprueba el paquete
+npm run verify:site https://anonimizador-ia-futuria.vercel.app          # hashes y cabeceras del sitio público
+npm run verify:site:browser https://anonimizador-ia-futuria.vercel.app  # recorrido real en navegador
+```
+
+Rollback: `vercel rollback` en el proyecto `futuria-s-projects/anonimizador-ia-futuria`, o
+`git revert 7250170 1b75c59` y volver a desplegar; el último estado anterior es `a81cf15`.
 
 ## Hallazgos cerrados en la puerta de salida
 

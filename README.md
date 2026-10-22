@@ -1,6 +1,6 @@
 # Anonimizador IA — FuturIA (App 7)
 
-> **Candidata de producción en preparación (2026-10-22), aún no aprobada.** Consulta `RELEASE-CHECKLIST.md`. Los conteos históricos siguientes no certifican esta candidata.
+> **Publicada en producción (2026-10-22): <https://anonimizador-ia-futuria.vercel.app>** — versión `v1.0.0`, commit `7250170`, `index.html` sha256 `3c187f19…`. Suite 429/429 sobre esa huella, paquete 6/6, recorrido en navegador 15/15, sitio público verificado por hash (35 archivos, 60 comprobaciones) y recorrido real sobre el sitio 12/12, cinco revisiones independientes sin hallazgos bloqueantes. Detalle y límites en `RELEASE-CHECKLIST.md`. **Pendiente declarado: prueba en teléfono físico y en otros navegadores** — la emulación no la sustituye. Los conteos históricos siguientes no certifican esta versión.
 
 > **Fase 0 y organización aprobada (2026-10-21): 253/253 sin fallos.** Herramienta **gratuita**, para equipos de empresa, genérica para toda Hispanoamérica. Una sola vista de trabajo (texto o documento), misma etiqueta para la misma entidad, nombres en MAYÚSCULAS, identificadores de 19 países con dígito verificador, teléfonos y monedas locales, fecha de nacimiento, lista blanca, recuperación tolerante, llave de recuperación descargable, diálogos propios, popovers accesibles y visor legible en móvil. No se realizó deploy público en esta tanda.
 

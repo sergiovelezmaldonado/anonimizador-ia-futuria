@@ -12,3 +12,5 @@ __pycache__/
 dist/
 scripts/reports/
 vendor/mammoth-browser/mammoth.browser.min.js
+
+.vercel

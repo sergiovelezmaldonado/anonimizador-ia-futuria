@@ -16,7 +16,9 @@
     "verify": "node scripts/verificar-produccion.mjs",
     "verify:browser": "node scripts/verificar-produccion-navegador.mjs",
     "test:production": "node --test pruebas/test-produccion-build.mjs",
-    "audit:dependencies": "node scripts/auditar-produccion.mjs"
+    "audit:dependencies": "node scripts/auditar-produccion.mjs",
+    "verify:site": "node scripts/verificar-sitio-publicado.mjs",
+    "verify:site:browser": "node scripts/verificar-sitio-navegador.mjs"
   },
   "dependencies": {
     "@fontsource/inter": "5.3.0",
